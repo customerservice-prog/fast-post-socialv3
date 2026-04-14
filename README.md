@@ -71,5 +71,7 @@ The repo root includes **`requirements.txt`**, **`build.sh`**, **`start.sh`**, a
 
 **Playwright/Chromium** on cloud hosts may need OS libraries; `start.sh` runs `playwright install --with-deps` so slim images still get shared libs. Use a persistent disk for **`DATABASE_PATH`** and **`PROFILES_DIR`** if you need data to survive restarts.
 
+**Headless / “headed browser without X server”:** Posting always uses **headless** Chromium on Render (and whenever `RENDER`/`CI`/etc. is set). Do **not** set **`FB_HEADED=1`** in production. `render.yaml` pins **`FB_HEADED=0`**. Smoke-test with `make verify-playwright` or `python scripts/verify_playwright_headless.py` after installing Playwright.
+
 ## License
 MIT

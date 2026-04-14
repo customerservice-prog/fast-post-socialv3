@@ -6,7 +6,7 @@
 
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('install', 'playwright', 'playwright-deps', 'dev', 'start-prod', 'help')]
+    [ValidateSet('install', 'playwright', 'playwright-deps', 'verify-playwright', 'dev', 'start-prod', 'help')]
     [string]$Command = 'help'
 )
 
@@ -40,6 +40,13 @@ switch ($Command) {
     'playwright-deps' {
         Invoke-Py -Args @('-m', 'pip', 'install', '-r', 'requirements.txt')
         Invoke-Py -Args @('-m', 'playwright', 'install', '--with-deps', 'chromium')
+    }
+    'verify-playwright' {
+        Invoke-Py -Args @('-m', 'pip', 'install', '-r', 'requirements.txt')
+        Set-Location (Join-Path $Root 'backend')
+        Invoke-Py -Args @('-m', 'playwright', 'install', 'chromium')
+        Set-Location $Root
+        Invoke-Py -Args @((Join-Path $Root 'scripts\verify_playwright_headless.py'))
     }
     'dev' {
         Invoke-Py -Args @('-m', 'pip', 'install', '-r', 'requirements.txt')

@@ -16,6 +16,7 @@ import asyncio
 import random
 import os
 import re
+import sys
 import time
 import logging
 from pathlib import Path
@@ -30,6 +31,48 @@ _stealth = Stealth()
 
 PROFILES_DIR = Path(os.getenv("PROFILES_DIR", "./browser_profiles"))
 PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _running_in_paas() -> bool:
+    """Render, GitHub Actions, Fly, Railway, K8s, etc. — never use a local X server here."""
+    return bool(
+        os.getenv("RENDER")
+        or os.getenv("CI")
+        or os.getenv("KUBERNETES_SERVICE_HOST")
+        or os.getenv("RAILWAY_ENVIRONMENT")
+        or os.getenv("RAILWAY_PUBLIC_DOMAIN")
+        or os.getenv("FLY_APP_NAME")
+    )
+
+
+def _default_headless() -> bool:
+    """
+    Headless is required on servers without a real X11/Wayland session. Some hosts set a
+    bogus DISPLAY; Chromium then picks ozone/x11 and exits. PaaS is always headless.
+    """
+    if _running_in_paas():
+        logger.info("[StealthPoster] PaaS environment — Chromium headless=True")
+        return True
+    headed = os.getenv("FB_HEADED", "").lower() in ("1", "true", "yes")
+    if sys.platform == "win32":
+        return not headed
+    display = (os.getenv("DISPLAY") or "").strip()
+    if headed and display:
+        return False
+    if headed and not display:
+        logger.warning(
+            "[StealthPoster] FB_HEADED=1 but DISPLAY is unset — using headless (typical for Docker)"
+        )
+    return True
+
+
+def _browser_subprocess_env(headless: bool) -> Dict[str, str]:
+    """Drop X11/Wayland hints so Chromium does not try a headed Ozone path on CI."""
+    env = dict(os.environ)
+    if headless:
+        for key in ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY"):
+            env.pop(key, None)
+    return env
 
 
 def _normalize_facebook_page_url(url: str) -> str:
@@ -48,11 +91,12 @@ class StealthPoster:
     def __init__(self, db, headless: Optional[bool] = None):
         self.db = db
         if headless is None:
-            # Docker/Render have no X server; headed mode needs DISPLAY or xvfb-run.
-            headed = os.getenv("FB_HEADED", "").lower() in ("1", "true", "yes")
-            headless = not headed
+            headless = _default_headless()
         self.headless = headless
-        logger.info("[StealthPoster] Chromium headless=%s (set FB_HEADED=1 locally to show browser)", headless)
+        logger.info(
+            "[StealthPoster] Chromium headless=%s (Windows desktop: FB_HEADED=1; PaaS: always headless)",
+            headless,
+        )
 
     @staticmethod
     def _env_leave_browser_open() -> bool:
@@ -84,6 +128,16 @@ class StealthPoster:
         playwright = await async_playwright().start()
         context = None
         try:
+            launch_args = [
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+            ]
+            if self.headless:
+                # New headless + Ozone headless avoid x11 when DISPLAY is set but unusable (common on PaaS).
+                launch_args.append("--headless=new")
+                if sys.platform != "win32":
+                    launch_args.append("--ozone-platform=headless")
             context = await playwright.chromium.launch_persistent_context(
                 user_data_dir=str(profile_path),
                 headless=self.headless,
@@ -96,13 +150,10 @@ class StealthPoster:
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
                     "Chrome/131.0.0.0 Safari/537.36"
                 ),
-                args=[
-                    "--disable-blink-features=AutomationControlled",
-                    "--no-sandbox",
-                    "--disable-dev-shm-usage",
-                ],
+                args=launch_args,
                 locale="en-US",
                 timezone_id=os.getenv("FB_TZ", "America/New_York"),
+                env=_browser_subprocess_env(self.headless),
             )
 
             page = context.pages[0] if context.pages else await context.new_page()

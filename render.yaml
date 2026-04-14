@@ -19,4 +19,7 @@ services:
         value: /data/fastpost.db
       - key: PROFILES_DIR
         value: /data/browser_profiles
+      # Force headless Chromium on Render (no X server). Remove or clear in dashboard if you truly use xvfb.
+      - key: FB_HEADED
+        value: "0"
       # No third-party API keys required. Optional: set SECRET_KEY in the dashboard for Flask session signing (defaults are fine for self-hosted use).
