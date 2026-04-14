@@ -1,7 +1,21 @@
 # Render Blueprint — https://render.com/docs/blueprint-spec
+# Persistent data: DB + Playwright browser profiles live under /data (requires a plan that supports disks on web services).
 services:
   - type: web
     name: fast-post-socialv3
     runtime: python
     buildCommand: pip install -r requirements.txt && cd backend && python -m playwright install chromium
     startCommand: sh start.sh
+    disk:
+      name: fastpost-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: FLASK_DEBUG
+        value: "0"
+      - key: DATABASE_PATH
+        value: /data/fastpost.db
+      - key: PROFILES_DIR
+        value: /data/browser_profiles
+      - key: SECRET_KEY
+        generateValue: true
