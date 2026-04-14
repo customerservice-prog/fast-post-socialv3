@@ -1,0 +1,54 @@
+# FastPost Social v3 - .gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+ENV/
+pip-log.txt
+pip-delete-this-directory.txt
+*.egg-info/
+dist/
+build/
+
+# Environment variables - NEVER commit these
+.env
+.env.*
+!.env.example
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Browser profiles (contain session cookies - sensitive!)
+backend/browser_profiles/
+browser_profiles/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Playwright
+playwright-report/
+test-results/
+
+# Node (if used)
+node_modules/
+package-lock.json
