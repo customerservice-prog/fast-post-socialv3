@@ -2,7 +2,7 @@
 
 An intelligent, **no–API-key** social media stack: no OpenAI, no cloud LLM billing, no vendor tokens. It scrapes your business website, generates captions **locally** from that content, and posts to Facebook/Instagram with stealth human-like behavior (your normal browser login — no platform API keys in this app).
 
-See **[NO_API_KEYS.md](NO_API_KEYS.md)** for a short checklist and **`.env.example`** for optional tuning (not API keys).
+See **[NO_API_KEYS.md](NO_API_KEYS.md)** for a short checklist, **[DEPLOY.md](DEPLOY.md)** for a saved Railway/deploy reference, and **`.env.example`** for optional tuning (not API keys).
 
 ## Project Structure
 - backend/app.py — Flask REST API server
