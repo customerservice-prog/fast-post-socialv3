@@ -43,9 +43,34 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.target === e.currentTarget) closeEditModal();
   });
 
+  document.getElementById('queueGrid').addEventListener('click', onQueueCardClick);
+  document.getElementById('queueGridOlder').addEventListener('click', onQueueCardClick);
+
   loadDashboard();
   checkScheduler();
 });
+
+/** Avoid inline onclick + caption escaping breaking sibling buttons; read id from the card. */
+function onQueueCardClick(ev) {
+  const btn = ev.target.closest('button[data-action]');
+  if (!btn) return;
+  const card = btn.closest('.post-card');
+  if (!card) return;
+  const postId = Number(card.dataset.id);
+  if (!Number.isFinite(postId) || postId <= 0) {
+    showToast('Invalid draft id — refresh the Daily Queue.', 'error');
+    return;
+  }
+  const action = btn.dataset.action;
+  if (action === 'edit') {
+    ev.preventDefault();
+    openEditPost(postId);
+  } else if (action === 'delete') {
+    deletePost(postId);
+  } else if (action === 'post') {
+    postNow(postId, btn);
+  }
+}
 
 /**
  * Shown on every full page load / refresh. Dismiss with Enter or Continue.
@@ -207,9 +232,9 @@ function postCardHtml(post) {
   const pub = post.status === 'published';
   const footer = pub
     ? '<button type="button" class="btn btn-secondary" disabled>Published</button>'
-    : `<button type="button" class="btn btn-secondary" onclick="editPost(${post.id}, \`${escJs(post.caption)}\`, \`${escJs(post.image_prompt || '')}\`)">Edit</button>
-          <button type="button" class="btn btn-danger btn-sm" onclick="deletePost(${post.id})">Delete</button>
-          <button type="button" class="btn btn-success" onclick="postNow(${post.id}, this)">Post now</button>`;
+    : `<button type="button" class="btn btn-secondary" data-action="edit">Edit</button>
+          <button type="button" class="btn btn-danger btn-sm" data-action="delete">Delete</button>
+          <button type="button" class="btn btn-success" data-action="post">Post now</button>`;
   return `
     <div class="post-card ${pub ? 'published' : ''}" data-id="${post.id}">
       <div class="post-card-header">
@@ -253,6 +278,15 @@ async function postNow(postId, btn) {
   btn.textContent = 'Posting...';
   showToast('Posting… If a Chromium window opened, complete any login there. This can take a few minutes.', 'info');
   try {
+    await apiFetch(`/queue/${postId}`, { method: 'GET' });
+  } catch (e) {
+    showToast('This draft is not on the server anymore. Refreshing the queue…', 'error');
+    btn.disabled = false;
+    btn.textContent = 'Post now';
+    loadDashboard();
+    return;
+  }
+  try {
     await apiFetch(`/post/${postId}`, { method: 'POST', timeoutMs: 1_300_000 });
     showToast('Posted successfully!', 'success');
     setTimeout(loadDashboard, 800);
@@ -274,12 +308,17 @@ async function deletePost(postId) {
   }
 }
 
-function editPost(postId, caption, imagePrompt) {
-  editingPostId = postId;
-  document.getElementById('editCaption').value = caption;
-  document.getElementById('editImagePrompt').textContent =
-    imagePrompt ? 'Image note: ' + imagePrompt : '';
-  document.getElementById('editModal').classList.remove('hidden');
+async function openEditPost(postId) {
+  try {
+    const post = await apiFetch(`/queue/${postId}`);
+    editingPostId = postId;
+    document.getElementById('editCaption').value = post.caption || '';
+    const ip = post.image_prompt || '';
+    document.getElementById('editImagePrompt').textContent = ip ? 'Image note: ' + ip : '';
+    document.getElementById('editModal').classList.remove('hidden');
+  } catch (e) {
+    showToast('Could not load that draft: ' + (e.message || 'Unknown'), 'error');
+  }
 }
 
 function closeEditModal() {

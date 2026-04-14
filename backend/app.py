@@ -209,7 +209,7 @@ def get_post(post_id):
     """Get a specific post from the queue"""
     post = db.get_post(post_id)
     if not post:
-        return jsonify({"error": "Post not found"}), 404
+        return jsonify({"error": "Post not found — refresh the queue."}), 404
     return jsonify(post)
 
 
@@ -239,7 +239,16 @@ def post_now(post_id):
     """
     post = db.get_post(post_id)
     if not post:
-        return jsonify({"error": "Post not found"}), 404
+        return jsonify(
+            {
+                "error": (
+                    "Post not found — it may have been deleted, or the server has a different "
+                    "database than when this page loaded. Refresh the queue and try again. "
+                    "(If you scaled to multiple instances without a shared disk/DB, use one instance "
+                    "or an external database.)"
+                )
+            }
+        ), 404
 
     account = db.get_account(post["account_id"])
     if not account:
