@@ -11,6 +11,8 @@ services:
       mountPath: /data
       sizeGB: 1
     envVars:
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: /app/.playwright-browsers
       - key: FLASK_DEBUG
         value: "0"
       - key: DATABASE_PATH
