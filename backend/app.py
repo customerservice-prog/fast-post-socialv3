@@ -16,7 +16,12 @@ from database import Database
 from crawler import BusinessCrawler
 from ai_generator import AIContentGenerator
 from scheduler import PostScheduler
-from stealth_poster import StealthPoster, PROFILES_DIR, UPLOADED_STORAGE_NAME
+from stealth_poster import (
+    StealthPoster,
+    PROFILES_DIR,
+    UPLOADED_STORAGE_NAME,
+    profile_has_headless_session_data,
+)
 
 load_dotenv()
 
@@ -30,6 +35,7 @@ CORS(app, supports_credentials=True)
 # Initialize core components
 db = Database()
 logger.info("SQLite path (set DATABASE_PATH for a persistent volume on Railway): %s", db.db_path)
+logger.info("PROFILES_DIR (set to /data/browser_profiles + volume for headless sessions): %s", PROFILES_DIR.resolve())
 crawler = BusinessCrawler()
 ai_gen = AIContentGenerator()
 scheduler = PostScheduler(db=db, ai_gen=ai_gen)
@@ -78,7 +84,7 @@ def _account_for_api(raw: dict) -> dict:
         iid = None
     out["has_playwright_session"] = bool(
         iid is not None
-        and (PROFILES_DIR / f"profile_{iid}" / UPLOADED_STORAGE_NAME).is_file()
+        and profile_has_headless_session_data(PROFILES_DIR / f"profile_{iid}")
     )
     return out
 
@@ -210,11 +216,17 @@ def delete_account(account_id):
 
 @app.route("/api/accounts/<int:account_id>/playwright-storage", methods=["GET"])
 def playwright_storage_status(account_id):
-    """Whether an uploaded Playwright storage_state JSON exists (for headless posting)."""
+    """Whether headless posting has session data (uploaded JSON and/or Chromium profile on disk)."""
     if not db.get_account(account_id):
         return jsonify({"error": "Account not found"}), 404
+    pdir = (PROFILES_DIR / f"profile_{account_id}").resolve()
     path = _playwright_storage_file(account_id)
-    return jsonify({"has_session": path.is_file()})
+    return jsonify(
+        {
+            "has_session": profile_has_headless_session_data(pdir),
+            "has_uploaded_json": path.is_file(),
+        }
+    )
 
 
 @app.route("/api/accounts/<int:account_id>/playwright-storage", methods=["POST"])

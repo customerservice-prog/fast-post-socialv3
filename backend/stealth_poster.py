@@ -36,6 +36,25 @@ PROFILES_DIR.mkdir(parents=True, exist_ok=True)
 UPLOADED_STORAGE_NAME = "uploaded_storage.json"
 
 
+def profile_has_headless_session_data(profile_dir: Path) -> bool:
+    """
+    True if headless posting can be attempted: uploaded Playwright storage and/or a Chromium
+    user-data-dir from launch_persistent_context (e.g. copied profile on a volume).
+    """
+    d = profile_dir.resolve()
+    if (d / UPLOADED_STORAGE_NAME).is_file():
+        return True
+    if not d.is_dir():
+        return False
+    chromium_markers = (
+        d / "Default" / "Network" / "Cookies",
+        d / "Default" / "Cookies",
+        d / "Local State",
+        d / "Default" / "Preferences",
+    )
+    return any(p.is_file() for p in chromium_markers)
+
+
 def _running_in_paas() -> bool:
     """Render, GitHub Actions, Fly, Railway, K8s, etc. — never use a local X server here."""
     return bool(
@@ -128,14 +147,23 @@ class StealthPoster:
         upload_path = profile_path / UPLOADED_STORAGE_NAME
         state_file = profile_path / "state.json"
 
-        if _running_in_paas() and not upload_path.is_file():
+        session_ok = profile_has_headless_session_data(profile_path)
+        logger.info(
+            "[StealthPoster] account profile=%s session_data=%s",
+            profile_path.name,
+            session_ok,
+        )
+        if _running_in_paas() and not session_ok:
             return {
                 "success": False,
                 "error": (
-                    "This host runs headless and cannot open a login window. "
-                    "Under Accounts, paste Playwright storage JSON for this account "
-                    "(run scripts/export_facebook_storage.py on your PC after logging in to Facebook), "
-                    "and mount PROFILES_DIR on a persistent volume. See DEPLOY.md."
+                    "This server runs headless — it cannot open a login window. "
+                    "No browser session was found for this account under PROFILES_DIR. "
+                    "Fix: (1) In Railway, set PROFILES_DIR=/data/browser_profiles and attach a volume at /data. "
+                    "(2) In Accounts, click Session JSON and paste the file from "
+                    "scripts/export_facebook_storage.py after you log in to Facebook on your PC "
+                    "(use the same linked account). Redeploy wipes ephemeral disk if the volume is missing. "
+                    "See DEPLOY.md."
                 ),
             }
 
