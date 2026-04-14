@@ -15,6 +15,8 @@ const API = (() => {
 let currentPage = 'queue';
 let editingPostId = null;
 let accounts = [];
+/** From GET /api/dashboard: true on Railway/cloud (no browser window on your PC). */
+let postingHeadless = true;
 
 document.addEventListener('DOMContentLoaded', () => {
   initConstructionOverlay();
@@ -131,6 +133,7 @@ async function loadDashboard() {
   try {
     const data = await apiFetch('/dashboard');
     accounts = data.accounts || [];
+    postingHeadless = data.posting_headless !== false;
     document.getElementById('statAccounts').textContent = accounts.length;
     document.getElementById('statPending').textContent = (data.pending_today || []).length;
     document.getElementById('statPublished').textContent = data.published_today_count ?? 0;
@@ -272,11 +275,31 @@ function renderRecentPublished(items) {
 }
 
 // ── POST ACTIONS ──────────────────────────────────────────────────────────────
+function postNowConfirmText() {
+  if (postingHeadless) {
+    return (
+      'Post this draft now?\n\n' +
+      'On this server, posting runs in a hidden (headless) browser — no window will open on your computer. ' +
+      'It can take 1–3 minutes. Keep this tab open and wait for success or an error message.'
+    );
+  }
+  return (
+    'Post this draft now? A Chromium window should open on this computer. It may take 1–3 minutes. Keep this tab open.'
+  );
+}
+
 async function postNow(postId, btn) {
-  if (!confirm('Post this to social media now? A browser window will open and may take 1–3 minutes. Keep this tab open.')) return;
+  if (!confirm(postNowConfirmText())) return;
   btn.disabled = true;
   btn.textContent = 'Posting...';
-  showToast('Posting… If a Chromium window opened, complete any login there. This can take a few minutes.', 'info');
+  if (postingHeadless) {
+    showToast(
+      'Posting in headless mode on the server (no popup). This can take a few minutes — do not close this tab.',
+      'info',
+    );
+  } else {
+    showToast('Posting… Complete any login in the Chromium window if it appears.', 'info');
+  }
   try {
     await apiFetch(`/queue/${postId}`, { method: 'GET' });
   } catch (e) {
@@ -287,8 +310,14 @@ async function postNow(postId, btn) {
     return;
   }
   try {
-    await apiFetch(`/post/${postId}`, { method: 'POST', timeoutMs: 1_300_000 });
-    showToast('Posted successfully!', 'success');
+    const posted = await apiFetch(`/post/${postId}`, { method: 'POST', timeoutMs: 1_300_000 });
+    const ph = posted.posting_headless !== false;
+    showToast(
+      ph
+        ? 'Posted successfully! Confirm on Facebook (post ran headless on the server).'
+        : 'Posted successfully!',
+      'success',
+    );
     setTimeout(loadDashboard, 800);
   } catch (e) {
     showToast('Posting failed: ' + (e.message || 'Unknown error'), 'error');

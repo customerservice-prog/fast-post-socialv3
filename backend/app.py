@@ -110,6 +110,8 @@ def get_dashboard():
             "published_today_count": db.count_published_today(),
             "recent_published": db.get_recent_published_all(15),
             "accounts": [_account_for_api(dict(a)) for a in db.get_all_accounts()],
+            # False only on a desktop with FB_HEADED=1; cloud is always True (no window on your PC).
+            "posting_headless": bool(poster.headless),
         }
     )
 
@@ -281,7 +283,13 @@ def post_now(post_id):
 
     if result["success"]:
         db.mark_post_published(post_id)
-        return jsonify({"message": "Posted successfully", "post_id": post_id})
+        return jsonify(
+            {
+                "message": "Posted successfully",
+                "post_id": post_id,
+                "posting_headless": bool(poster.headless),
+            }
+        )
     else:
         return jsonify({"error": result.get("error", "Unknown error")}), 500
 
@@ -332,7 +340,13 @@ def scheduler_status():
 
 @app.route("/api/health", methods=["GET"])
 def health():
-    return jsonify({"status": "ok", "version": "3.0.0"})
+    return jsonify(
+        {
+            "status": "ok",
+            "version": "3.0.0",
+            "posting_headless": bool(poster.headless),
+        }
+    )
 
 
 # ─── MAIN ────────────────────────────────────────────────────────────────────
