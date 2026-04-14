@@ -1,2 +1,24 @@
-# Root file so Railpack / Render / Nixpacks detect Python. Installs backend deps.
--r backend/requirements.txt
+# Root deps for Railpack/Render: install layer only has this file (no -r to subdirs).
+# Keep in sync with comments in backend/requirements.txt; local: pip install -r requirements.txt from repo root or backend/
+
+# Web Framework
+flask==3.0.3
+flask-cors==4.0.1
+
+# Environment variables
+python-dotenv==1.0.1
+
+# Browser Automation (Stealth Posting)
+playwright>=1.49.0
+playwright-stealth>=2.0.0
+
+# Web Crawling / Scraping
+requests==2.32.3
+beautifulsoup4==4.12.3
+
+# Task Scheduling
+APScheduler==3.10.4
+pytz==2024.1
+
+# Utilities
+certifi==2024.6.2
