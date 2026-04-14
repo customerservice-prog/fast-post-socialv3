@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>FastPost Social v3 — AI Marketing Bot</title>
+    <title>FastPost Social v3 — Social Queue</title>
   <link rel="stylesheet" href="style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -13,21 +13,21 @@
   <!-- ===== SIDEBAR ===== -->
   <aside class="sidebar">
     <div class="sidebar-logo">
-      <span class="logo-icon">⚡</span>
+      <span class="logo-icon" aria-hidden="true">&#9889;</span>
       <span class="logo-text">FastPost v3</span>
     </div>
     <nav class="sidebar-nav">
       <a href="#" class="nav-item active" data-page="queue">
-        <span class="nav-icon">📋</span> Daily Queue
+        <span class="nav-icon" aria-hidden="true">&#128203;</span> Daily Queue
     </a>
       <a href="#" class="nav-item" data-page="accounts">
         <span class="nav-icon">🔗</span> Accounts
       </a>
       <a href="#" class="nav-item" data-page="analytics">
-        <span class="nav-icon">📊</span> Analytics
+        <span class="nav-icon" aria-hidden="true">&#128202;</span> Analytics
       </a>
       <a href="#" class="nav-item" data-page="settings">
-      <span class="nav-icon">⚙️</span> Settings
+      <span class="nav-icon" aria-hidden="true">&#9881;&#65039;</span> Settings
       </a>
     </nav>
     <div class="sidebar-status">
@@ -46,11 +46,11 @@
         <span id="todayDate" class="date-badge"></span>
       </div>
     <div class="topbar-right">
-        <button class="btn btn-secondary" id="btnGeneratePosts">
-          ✨ Generate Today's Posts
+        <button type="button" class="btn btn-secondary" id="btnGeneratePosts" title="Creates 3 draft posts per linked account from your website (no external APIs).">
+          Build today's posts
         </button>
-        <button class="btn btn-primary" id="btnRefresh">
-          🔄 Refresh
+        <button type="button" class="btn btn-primary" id="btnRefresh">
+          Refresh
         </button>
       </div>
   </header>
@@ -63,24 +63,43 @@
       <div class="stats-row" id="statsRow">
       <div class="stat-card">
           <div class="stat-number" id="statPending">—</div>
-          <div class="stat-label">Pending</div>
+          <div class="stat-label">Drafts ready today</div>
         </div>
         <div class="stat-card">
           <div class="stat-number" id="statPublished">—</div>
-          <div class="stat-label">Published Today</div>
+          <div class="stat-label">Published today</div>
         </div>
         <div class="stat-card">
           <div class="stat-number" id="statAccounts">—</div>
-          <div class="stat-label">Linked Accounts</div>
+          <div class="stat-label">Linked accounts</div>
         </div>
       </div>
 
-      <div class="queue-grid" id="queueGrid">
-        <div class="empty-state">
-          <div class="empty-icon">📭</div>
-          <p>No posts in today's queue.</p>
-          <p>Click <strong>Generate Today's Posts</strong> to get started!</p>
+      <div id="queueOnboarding" class="onboarding-banner hidden" aria-live="polite"></div>
+      <div id="accountsStrip" class="accounts-strip hidden" aria-label="Linked accounts"></div>
+
+      <div class="queue-section">
+        <div class="section-head">
+          <h2 class="section-title">Today's drafts</h2>
+          <p class="section-sub" id="todayDraftsSub">Posts dated for today that you can edit and publish.</p>
         </div>
+        <div class="queue-grid" id="queueGrid"></div>
+      </div>
+
+      <div id="olderDraftsSection" class="queue-section hidden">
+        <div class="section-head">
+          <h2 class="section-title">Older drafts</h2>
+          <p class="section-sub">From a previous day — still pending. Post or delete when you're ready.</p>
+        </div>
+        <div class="queue-grid" id="queueGridOlder"></div>
+      </div>
+
+      <div class="queue-section">
+        <div class="section-head">
+          <h2 class="section-title">Recently published</h2>
+          <p class="section-sub">What FastPost has already posted from this app (confirm on your Page too).</p>
+        </div>
+        <div id="recentPublished" class="recent-published-list"></div>
       </div>
     </section>
 
@@ -143,6 +162,7 @@
       </div>
       <div class="card">
         <h2>Post History</h2>
+        <p class="muted section-sub" style="margin-top:-12px;margin-bottom:16px;">All accounts — posts marked published from this app. Engagement stats appear when you add analytics rows.</p>
         <div id="postHistory" class="post-history">Loading...</div>
       </div>
     </section>
@@ -158,16 +178,16 @@
             <p id="nextRunTime" class="muted">Next run: loading...</p>
           </div>
           <div class="settings-btns">
-            <button class="btn btn-primary" id="btnStartScheduler">▶ Start Scheduler</button>
-            <button class="btn btn-danger" id="btnStopScheduler">⏹ Stop Scheduler</button>
-            <button class="btn btn-secondary" id="btnTriggerNow">⚡ Generate Now</button>
+            <button type="button" class="btn btn-primary" id="btnStartScheduler">Start Scheduler</button>
+            <button type="button" class="btn btn-danger" id="btnStopScheduler">Stop Scheduler</button>
+            <button type="button" class="btn btn-secondary" id="btnTriggerNow">Generate drafts now</button>
         </div>
         </div>
       </div>
       <div class="card">
         <h2>About</h2>
-        <p>FastPost Social v3 — AI-powered social media automation.</p>
-        <p>Backend: Flask + SQLite | AI: GPT-4o | Automation: Playwright Stealth</p>
+        <p>FastPost Social v3 — local drafts from your site, human-approved posting.</p>
+        <p>Backend: Flask + SQLite | Captions: local templates + crawl | Automation: Playwright Stealth</p>
       <p class="muted">Posts to Facebook/Instagram using human-like browser automation.</p>
     </div>
   </section>
@@ -179,7 +199,7 @@
     <div class="modal">
       <div class="modal-header">
         <h3>Edit Post</h3>
-        <button class="modal-close" id="closeModal">✕</button>
+        <button type="button" class="modal-close" id="closeModal" aria-label="Close">&times;</button>
       </div>
       <div class="modal-body">
         <div class="form-group">
@@ -189,8 +209,8 @@
         <div id="editImagePrompt" class="image-prompt-preview"></div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" id="cancelEdit">Cancel</button>
-        <button class="btn btn-primary" id="saveEdit">Save Changes</button>
+        <button type="button" class="btn btn-secondary" id="cancelEdit">Cancel</button>
+        <button type="button" class="btn btn-primary" id="saveEdit">Save Changes</button>
       </div>
     </div>
   </div>

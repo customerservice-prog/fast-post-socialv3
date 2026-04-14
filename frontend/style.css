@@ -158,6 +158,98 @@ body {
 .stat-number { font-size: 32px; font-weight: 700; color: var(--accent2); }
 .stat-label { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
 
+/* ── QUEUE UX: onboarding, account strip, sections ── */
+.onboarding-banner {
+    background: linear-gradient(135deg, rgba(108, 99, 255, 0.12), rgba(139, 133, 255, 0.06));
+    border: 1px solid var(--accent);
+    border-radius: var(--card-radius);
+    padding: 16px 20px;
+    margin-bottom: 20px;
+}
+.onboarding-inner strong { display: block; font-size: 14px; margin-bottom: 8px; color: var(--text); }
+.onboarding-inner p { font-size: 13px; color: var(--text-muted); line-height: 1.55; margin: 0; }
+.onboarding-inner p + p { margin-top: 8px; }
+.onboarding-note { color: var(--text) !important; }
+.onboarding-foot { margin-top: 10px !important; }
+.inline-link { color: var(--accent2); font-weight: 600; text-decoration: underline; cursor: pointer; }
+
+.accounts-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 22px;
+}
+.account-chip {
+    display: inline-flex;
+    flex-direction: column;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg2);
+    min-width: 168px;
+}
+.account-chip--ok { border-color: rgba(34, 197, 94, 0.45); }
+.account-chip--warn { border-color: rgba(245, 158, 11, 0.45); }
+.account-chip-icon { font-size: 14px; margin-bottom: 4px; }
+.account-chip-name { font-weight: 600; font-size: 13px; }
+.account-chip-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+.queue-section { margin-bottom: 36px; }
+.section-head { margin-bottom: 14px; }
+.section-title { font-size: 15px; font-weight: 600; color: var(--text); }
+.section-sub { font-size: 12px; color: var(--text-muted); margin-top: 6px; max-width: 720px; line-height: 1.5; }
+
+.recent-published-list { display: flex; flex-direction: column; gap: 12px; }
+.recent-item {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--card-radius);
+    padding: 14px 16px;
+}
+.recent-item-top {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    align-items: center;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+.recent-name { font-weight: 600; color: var(--text); }
+.recent-date { margin-left: auto; font-size: 11px; }
+.recent-type { font-size: 11px; color: var(--accent2); margin: 8px 0 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+.recent-caption { font-size: 13px; line-height: 1.55; color: var(--text); white-space: pre-wrap; }
+.recent-empty { padding: 28px 16px !important; }
+
+.account-title-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+.account-title-row h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.platform-tag {
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    white-space: nowrap;
+}
+.platform-facebook { border-color: rgba(24, 119, 242, 0.5); color: #7ab8ff; }
+.platform-instagram { border-color: rgba(228, 64, 95, 0.5); color: #f472b6; }
+.platform-both { border-color: var(--accent); color: var(--accent2); }
+
+.account-links { margin-top: 4px; font-size: 12px; }
+.account-links a { color: var(--accent2); }
+.account-meta-row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-top: 10px; }
+.status-pill { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 20px; }
+.status-pill--ok { background: rgba(34, 197, 94, 0.15); color: var(--success); }
+.status-pill--warn { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
+.meta-text { font-size: 11px; color: var(--text-muted); }
+.crawl-preview { font-size: 12px; color: var(--text-muted); margin-top: 8px; line-height: 1.45; max-width: 560px; }
+.next-step-hint { font-size: 12px; color: var(--accent2); margin-top: 10px; line-height: 1.4; }
+
+.history-item--wide { grid-template-columns: minmax(100px, 140px) 1fr minmax(90px, 120px); }
+.history-item--wide .history-caption { white-space: normal; line-height: 1.4; }
+.history-platform { display: block; font-size: 10px; color: var(--text-muted); font-weight: 400; text-transform: none; letter-spacing: 0; margin-top: 4px; }
+
+.post-card-footer .btn-sm { flex: 0 0 auto; }
+
 /* ── QUEUE GRID ── */
 .queue-grid {
     display: grid;
@@ -267,8 +359,9 @@ body {
     border-radius: var(--card-radius);
     padding: 16px 20px;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
+    gap: 16px;
 }
 .account-info h3 { font-size: 15px; font-weight: 600; }
 .account-info p { font-size: 12px; color: var(--text-muted); margin-top: 3px; }

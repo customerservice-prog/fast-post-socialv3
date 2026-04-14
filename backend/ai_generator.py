@@ -1,206 +1,217 @@
 """
-FastPost Social v3 - AI Content Generator
-Uses OpenAI GPT-4o to generate 3 daily social media posts per account
+FastPost Social v3 - Local Content Generator
+Builds 3 daily post drafts from your crawl data — no external AI APIs.
 Post types: Morning Promo, Mid-day Tip, Evening Social Proof
 """
 
-import os
-import json
-from datetime import datetime, date, timedelta
-from typing import List, Dict, Optional
-from openai import OpenAI
+import re
+from datetime import date
+from typing import List, Dict, Optional, Tuple
 
 
 class AIContentGenerator:
-      def __init__(self, api_key: str):
-                self.client = OpenAI(api_key=api_key)
-                self.model = "gpt-4o"
+    """Generates captions from structured crawl data using templates and light text shaping."""
 
-          # Daily post schedule times
-                self.schedule = {
-                    "morning":   "09:00",
-                    "afternoon": "13:00",
-                    "evening":   "18:00",
-                }
+    def __init__(self, api_key: Optional[str] = None):
+        # api_key accepted for backward compatibility; ignored (no cloud APIs).
+        self.schedule = {
+            "morning": "09:00",
+            "afternoon": "13:00",
+            "evening": "18:00",
+        }
 
-      def generate_daily_posts(
-                self,
-                business_name: str,
-                business_url: str,
-                platform: str,
-                crawl_data: Optional[Dict] = None
-      ) -> List[Dict]:
-                """
-                        Generate 3 posts for today: morning promo, afternoon tip, evening social proof.
-                                Returns list of post dicts ready to insert into DB.
-                                        """
-                today = date.today().strftime("%Y-%m-%d")
-                business_context = self._build_context(business_name, business_url, crawl_data)
-                platform_context = self._platform_context(platform)
+    def generate_daily_posts(
+        self,
+        business_name: str,
+        business_url: str,
+        platform: str,
+        crawl_data: Optional[Dict] = None,
+    ) -> List[Dict]:
+        """
+        Generate 3 posts for today: morning promo, afternoon tip, evening social proof.
+        Returns list of post dicts ready to insert into DB.
+        """
+        today = date.today().strftime("%Y-%m-%d")
+        ctx = self._extract_context(business_name, business_url, crawl_data)
+        seed = date.today().toordinal() + len(business_name)
 
-          posts = []
-
-        post_types = [
-                      {
-                                        "type": "morning_promo",
-                                        "time": self.schedule["morning"],
-                                        "instruction": (
-                                                              "Write a morning PROMOTIONAL post. Highlight a specific service or product, "
-                                                              "create urgency, include a call-to-action like 'Book now' or 'DM us to reserve'. "
-                                                              "Use 2-3 relevant emojis. Keep it under 150 words."
-                                        )
-                      },
-                      {
-                                        "type": "afternoon_tip",
-                                        "time": self.schedule["afternoon"],
-                                        "instruction": (
-                                                              "Write a mid-day TIPS/VALUE post. Share a helpful tip related to the business "
-                                                              "(e.g. 'How to pick the right bounce house for your party size'). "
-                                                              "Make it educational and shareable. 2-3 emojis. Under 120 words."
-                                        )
-                      },
-                      {
-                                        "type": "evening_proof",
-                                        "time": self.schedule["evening"],
-                                        "instruction": (
-                                                              "Write an evening SOCIAL PROOF post. Simulate a happy customer story or "
-                                                              "highlight a recent event the business helped with. "
-                                                              "Make it warm, community-focused, include a question to drive comments. "
-                                                              "2-3 emojis. Under 130 words."
-                                        )
-                      }
+        posts_meta = [
+            ("morning_promo", self.schedule["morning"], self._morning_promo),
+            ("afternoon_tip", self.schedule["afternoon"], self._afternoon_tip),
+            ("evening_proof", self.schedule["evening"], self._evening_proof),
         ]
 
-        for pt in post_types:
-                      try:
-                                        caption, image_prompt = self._generate_post(
-                                                              business_context=business_context,
-                                                              platform_context=platform_context,
-                                                              instruction=pt["instruction"],
-                                                              post_type=pt["type"]
-                                        )
-                                        scheduled_time = f"{today} {pt['time']}:00"
-                                        posts.append({
-                                            "type": pt["type"],
-                                            "caption": caption,
-                                            "image_prompt": image_prompt,
-                                            "scheduled_time": scheduled_time,
-                                        })
-except Exception as e:
-                print(f"[AI Generator] Error generating {pt['type']}: {e}")
-                # Fallback post
-                posts.append({
-                                      "type": pt["type"],
-                                      "caption": self._fallback_caption(business_name, pt["type"]),
-                                      "image_prompt": f"Professional photo of {business_name} services",
-                                      "scheduled_time": f"{today} {pt['time']}:00",
-                })
+        posts = []
+        for post_type, time_str, builder in posts_meta:
+            caption, image_prompt = builder(ctx, platform, seed)
+            seed += 17
+            posts.append(
+                {
+                    "type": post_type,
+                    "caption": caption,
+                    "image_prompt": image_prompt,
+                    "scheduled_time": f"{today} {time_str}:00",
+                }
+            )
 
         return posts
 
-    def _generate_post(
-              self,
-              business_context: str,
-              platform_context: str,
-              instruction: str,
-              post_type: str
-    ):
-              """Call GPT-4o to generate caption + image prompt"""
-              system_prompt = f"""You are an expert social media marketing copywriter specializing in local businesses.
-      You write engaging, authentic posts that drive real engagement.
-      {platform_context}
+    def _extract_context(
+        self, business_name: str, business_url: str, crawl_data: Optional[Dict]
+    ) -> Dict:
+        cd = crawl_data or {}
+        services = [s for s in cd.get("services") or [] if s]
+        prices = [p for p in cd.get("prices") or [] if p]
+        headings = [h for h in cd.get("key_headings") or [] if h]
+        images = [i for i in cd.get("image_descriptions") or [] if i]
+        samples = [t for t in cd.get("text_samples") or [] if t]
+        summary = (cd.get("summary") or "").strip()
+        snippet = ""
+        if samples:
+            snippet = self._clean_snippet(samples[0], 220)
+        elif summary:
+            snippet = self._clean_snippet(summary, 220)
+        return {
+            "business_name": business_name.strip() or "Our business",
+            "business_url": business_url.strip(),
+            "services": services[:12],
+            "prices": prices[:5],
+            "headings": headings[:8],
+            "images": images[:6],
+            "snippet": snippet,
+        }
 
-      IMPORTANT RULES:
-      - Never use generic phrases like "We are excited to announce"
-      - Write like a real local business owner, not a corporation
-      - Include location vibes if relevant (community, neighborhood feel)
-      - Vary the caption style each day - never repeat structures
-      - Always make the CTA specific and actionable"""
+    def _clean_snippet(self, text: str, max_len: int) -> str:
+        t = re.sub(r"\s+", " ", text).strip()
+        if len(t) <= max_len:
+            return t
+        return t[: max_len - 1].rsplit(" ", 1)[0] + "…"
 
-        user_prompt = f"""BUSINESS CONTEXT:
-        {business_context}
+    def _pick(self, options: List[str], seed: int) -> str:
+        if not options:
+            return ""
+        return options[seed % len(options)]
 
-        TASK: {instruction}
+    def _service_line(self, ctx: Dict, seed: int) -> str:
+        svcs = ctx["services"]
+        if len(svcs) >= 2:
+            a, b = self._pick(svcs, seed), self._pick(svcs, seed + 3)
+            if a != b:
+                return f"From {a} to {b}, we help you get it right."
+        if svcs:
+            return f"Ask us about {svcs[0]} — we'd love to help."
+        if ctx["headings"]:
+            return f"Focused on: {ctx['headings'][0]}."
+        return "Reach out and we'll walk you through options."
 
-        Return your response as JSON with exactly these two keys:
-        {{
-          "caption": "the full post caption text here",
-            "image_prompt": "a detailed DALL-E prompt to generate a matching image (describe the scene, style, colors)"
-}}"""
+    def _morning_promo(self, ctx: Dict, platform: str, seed: int) -> Tuple[str, str]:
+        name = ctx["business_name"]
+        opens = [
+            f"Good morning! ☀️ {name} is here when you're ready to plan your next step.",
+            f"Rise and shine! 🌤️ Start the day with {name} — local, friendly, and ready to help.",
+            f"Morning crew! 👋 {name} has openings and answers — let's make today easier.",
+        ]
+        body = self._service_line(ctx, seed)
+        price_hint = ""
+        if ctx["prices"]:
+            price_hint = f" See current offers from {ctx['prices'][0]}."
+        ctas = [
+            "Message us to reserve your spot.",
+            "Call or DM — we'll get you scheduled.",
+            "Tap in — we reply fast.",
+        ]
+        caption = f"{self._pick(opens, seed)}\n\n{body}{price_hint}\n\n{self._pick(ctas, seed + 1)}"
+        caption = self._append_platform_tail(caption, ctx, platform, seed)
+        img = self._image_prompt(name, ctx, "bright, welcoming, professional local business scene")
+        return caption, img
 
-        response = self.client.chat.completions.create(
-                      model=self.model,
-                      messages=[
-                                        {"role": "system", "content": system_prompt},
-                                        {"role": "user", "content": user_prompt}
-                      ],
-                      temperature=0.85,
-                      response_format={"type": "json_object"},
-                      max_tokens=600
+    def _afternoon_tip(self, ctx: Dict, platform: str, seed: int) -> Tuple[str, str]:
+        name = ctx["business_name"]
+        tips = [
+            (
+                "Quick tip: book early for the best selection and calmer planning.",
+                "Early planning saves stress and money.",
+            ),
+            (
+                "Quick tip: ask what's included before you compare quotes — apples to apples matters.",
+                "Clear questions get clear answers.",
+            ),
+            (
+                "Quick tip: share your headcount and date up front — we can match you faster.",
+                "Details help us help you.",
+            ),
+        ]
+        tip_title, tip_sub = tips[seed % len(tips)]
+        extra = ""
+        if ctx["snippet"]:
+            extra = f"\n\nIn our own words: {ctx['snippet']}"
+        elif ctx["headings"]:
+            extra = f"\n\nPopular topic: {ctx['headings'][0]}."
+        caption = (
+            f"💡 {tip_title}\n{tip_sub}\n\n"
+            f"{name} is happy to guide you.{extra}\n\n"
+            f"Questions? Drop a comment or DM."
         )
+        caption = self._append_platform_tail(caption, ctx, platform, seed + 2)
+        img = self._image_prompt(name, ctx, "helpful how-to vibe, clean and friendly")
+        return caption, img
 
-        result = json.loads(response.choices[0].message.content)
-        caption = result.get("caption", "").strip()
-        image_prompt = result.get("image_prompt", "").strip()
-        return caption, image_prompt
+    def _evening_proof(self, ctx: Dict, platform: str, seed: int) -> Tuple[str, str]:
+        name = ctx["business_name"]
+        stories = [
+            (
+                "Tonight we're grateful for everyone who trusted us this season.",
+                "Your events and projects keep our team motivated.",
+            ),
+            (
+                "Love seeing our neighbors choose local. Thank you for the support.",
+                "Every referral and kind word matters.",
+            ),
+            (
+                "Wrapping the day thankful for another round of great customers.",
+                "We don't take your trust lightly.",
+            ),
+        ]
+        s1, s2 = stories[seed % len(stories)]
+        questions = [
+            "What's the next milestone you're planning for?",
+            "What would make your next project a home run?",
+            "Tell us: what's one thing you'd love to check off your list this month?",
+        ]
+        caption = (
+            f"🌙 {s1}\n{s2}\n\n"
+            f"— {name}\n\n"
+            f"{self._pick(questions, seed)}"
+        )
+        caption = self._append_platform_tail(caption, ctx, platform, seed + 4)
+        img = self._image_prompt(name, ctx, "warm community evening feel, authentic local business")
+        return caption, img
 
-    def _build_context(
-              self, business_name: str, business_url: str, crawl_data: Optional[Dict]
-    ) -> str:
-              """Build a rich business context string from crawl data"""
-              lines = [f"Business Name: {business_name}", f"Website: {business_url}"]
+    def _append_platform_tail(self, caption: str, ctx: Dict, platform: str, seed: int) -> str:
+        pl = platform.lower()
+        if pl in ("instagram", "ig"):
+            tags = self._build_hashtags(ctx["business_name"], ctx["services"], seed)
+            if tags:
+                return f"{caption.rstrip()}\n\n{tags}"
+        return caption
 
-        if crawl_data:
-                      if crawl_data.get("services"):
-                                        lines.append(f"Services/Products: {', '.join(crawl_data['services'])}")
-                                    if crawl_data.get("prices"):
-                                                      lines.append(f"Sample Prices: {', '.join(crawl_data['prices'])}")
-                                                  if crawl_data.get("key_headings"):
-                                                                    lines.append(f"Key Page Headings: {', '.join(crawl_data['key_headings'][:5])}")
-                                                                if crawl_data.get("image_descriptions"):
-                                                                                  lines.append(f"Visual Content: {', '.join(crawl_data['image_descriptions'][:4])}")
-                                                                              if crawl_data.get("text_samples"):
-                                                                                                lines.append(f"About the business: {crawl_data['text_samples'][0][:300]}")
+    def _build_hashtags(self, business_name: str, services: List[str], seed: int) -> str:
+        raw = [business_name] + services
+        tags = []
+        for r in raw:
+            w = re.sub(r"[^a-zA-Z0-9]+", "", r.replace(" ", "").lower())
+            if len(w) >= 3 and w not in tags:
+                tags.append(f"#{w[:30]}")
+            if len(tags) >= 8:
+                break
+        if not tags:
+            tags = ["#localbusiness", "#smallbusiness"]
+        return " ".join(tags)
 
-        return "\n".join(lines)
-
-    def _platform_context(self, platform: str) -> str:
-              """Platform-specific writing guidelines"""
-        guidelines = {
-                      "facebook": (
-                                        "Platform: Facebook. Write for Facebook audiences (ages 25-55). "
-                                        "Longer captions OK (up to 150 words). Use line breaks for readability. "
-                                        "Tag location if known. Encourage comments and shares."
-                      ),
-                      "instagram": (
-                                        "Platform: Instagram. Write for Instagram (ages 18-40). "
-                                        "Punchy opening line. Use relevant hashtags at the end (5-8 hashtags). "
-                                        "Keep main caption under 100 words, hashtags separate."
-                      ),
-                      "both": (
-                                        "Platform: Facebook & Instagram cross-post. "
-                                        "Write for broad audience. Include 3-5 hashtags inline. "
-                                        "Engaging opening, clear CTA."
-                      ),
-        }
-        return guidelines.get(platform.lower(), guidelines["facebook"])
-
-    def _fallback_caption(self, business_name: str, post_type: str) -> str:
-              """Emergency fallback captions if AI fails"""
-        fallbacks = {
-                      "morning_promo": (
-                                        f"Good morning! Ready to make your event unforgettable? "
-                                        f"{business_name} has everything you need. DM us to book today!"
-                      ),
-                      "afternoon_tip": (
-                                        f"Planning a party? Here's a tip: always book your rentals "
-                                        f"at least 2 weeks in advance for the best selection. "
-                                        f"{business_name} has you covered!"
-                      ),
-                      "evening_proof": (
-                                        f"Another amazing event in the books! Thank you to all our "
-                                        f"customers who trusted {business_name} with their special day. "
-                                        f"What's your favorite party memory? Tell us below!"
-                      ),
-        }
-        return fallbacks.get(post_type, f"Check out {business_name} for all your event needs!")
+    def _image_prompt(self, business_name: str, ctx: Dict, mood: str) -> str:
+        parts = [f"Photo concept for {business_name}: {mood}."]
+        if ctx["services"]:
+            parts.append(f"Subtle nod to: {', '.join(ctx['services'][:4])}.")
+        if ctx["images"]:
+            parts.append(f"Visual ideas: {ctx['images'][0][:120]}.")
+        return " ".join(parts)

@@ -9,17 +9,14 @@ flask-cors==4.0.1
 # Environment variables
 python-dotenv==1.0.1
 
-# AI Content Generation
-openai==1.30.5
-
 # Browser Automation (Stealth Posting)
-playwright==1.44.0
-playwright-stealth==1.0.6
+# Newer Playwright pulls greenlet wheels for current Python (3.14+); avoid old pins that force source builds.
+playwright>=1.49.0
+playwright-stealth>=2.0.0
 
-# Web Crawling / Scraping
+# Web Crawling / Scraping (BeautifulSoup uses built-in html.parser — lxml not required)
 requests==2.32.3
 beautifulsoup4==4.12.3
-lxml==5.2.2
 
 # Task Scheduling
 APScheduler==3.10.4

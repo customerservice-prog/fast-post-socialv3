@@ -1,11 +1,11 @@
 # FastPost Social v3 — AI Social Media Marketing Bot
 
-An intelligent, no-API social media automation platform. Scrapes your business website, uses GPT-4o to generate captions, and posts to Facebook/Instagram with stealth human-like behavior.
+An intelligent, no-third-party-AI social media automation platform. Scrapes your business website, generates captions locally from that content, and posts to Facebook/Instagram with stealth human-like behavior.
 
 ## Project Structure
 - backend/app.py — Flask REST API server
 - backend/crawler.py — Business website scraper  
-- backend/ai_generator.py — GPT-4o content generator
+- backend/ai_generator.py — Local template-based content generator
 - backend/scheduler.py — 3x/day post scheduler
 - backend/stealth_poster.py — Playwright stealth automation
 - backend/database.py — SQLite handler
@@ -25,7 +25,7 @@ An intelligent, no-API social media automation platform. Scrapes your business w
 ## Tech Stack
 - Frontend: HTML5, CSS3, Vanilla JS
 - Backend: Python 3.11, Flask
-- AI: OpenAI GPT-4o
+- Content: local templates + crawl data (no API keys)
 - Automation: Playwright + playwright-stealth
 - Scraping: BeautifulSoup4
 - Scheduling: APScheduler
@@ -39,14 +39,12 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
-Create .env in /backend:
+Optional `.env` in `/backend` (for production, set a strong `SECRET_KEY`):
 ```
-OPENAI_API_KEY=your_key_here
 SECRET_KEY=your_secret
 ```
 
-Run: python app.py
-Open frontend/index.html in browser.
+Run: `python app.py` from `/backend`, then open **http://localhost:5000** (the server serves the dashboard).
 
 ## License
 MIT
