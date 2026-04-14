@@ -46,6 +46,7 @@ desktop.ini
 *.swo
 
 # Playwright
+.playwright-browsers/
 playwright-report/
 test-results/
 

@@ -2,63 +2,67 @@
 
 An intelligent, **no–API-key** social media stack: no OpenAI, no cloud LLM billing, no vendor tokens. It scrapes your business website, generates captions **locally** from that content, and posts to Facebook/Instagram with stealth human-like behavior (your normal browser login — no platform API keys in this app).
 
+See **[NO_API_KEYS.md](NO_API_KEYS.md)** for a short checklist and **`.env.example`** for optional tuning (not API keys).
+
 ## Project Structure
 - backend/app.py — Flask REST API server
 - backend/crawler.py — Business website scraper  
 - backend/ai_generator.py — Local template-based content generator
-- backend/scheduler.py — 3x/day post scheduler
+- backend/scheduler.py — Daily draft scheduler
 - backend/stealth_poster.py — Playwright stealth automation
 - backend/database.py — SQLite handler
+- backend/wsgi.py — Gunicorn entry (production)
 - frontend/index.html — Dashboard UI
 - frontend/style.css — Dashboard styles
 - frontend/app.js — Dashboard logic
 
 ## Features
-- AI generates 3 daily posts from your business website
-- Daily Queue Dashboard to review before posting
-- Human-in-the-Loop posting (you approve, stealth browser posts)
-- Anti-detection: playwright-stealth, random timing, human mouse curves
-- Multi-account support (Facebook, Instagram)
-- Engagement learning to improve posts over time
-- SaaS-ready architecture
+- Builds **three draft posts per account per day** from crawled website content (local templates, no cloud LLM)
+- Daily Queue dashboard to review and edit before posting
+- Human-in-the-loop posting (you trigger **Post now**; stealth browser runs headless on servers)
+- Anti-detection helpers: playwright-stealth, jittered timing, human-like interaction patterns
+- Multi-account support (Facebook, Instagram labels; posting uses your logged-in session)
+- SQLite + optional disk paths for production persistence
+- Deploy-friendly: root `requirements.txt`, `start.sh`, `build.sh`, `render.yaml`
 
 ## Tech Stack
 - Frontend: HTML5, CSS3, Vanilla JS
-- Backend: Python 3.11, Flask
+- Backend: Python 3.11+, Flask, Gunicorn (production)
 - Content: local templates + crawl data (no API keys)
 - Automation: Playwright + playwright-stealth
-- Scraping: BeautifulSoup4
+- Scraping: BeautifulSoup4 + requests
 - Scheduling: APScheduler
 - Database: SQLite
 
 ## Setup
 ```bash
 git clone https://github.com/customerservice-prog/fast-post-socialv3.git
-cd fast-post-socialv3/backend
+cd fast-post-socialv3
 pip install -r requirements.txt
-playwright install chromium
+python -m playwright install chromium
+cd backend && python app.py
 ```
 
-Optional `.env` in `/backend` — **not** API keys; only tuning and Flask:
+Open **http://localhost:5000** (Flask serves the dashboard from the repo).
 
+Optional: copy **`.env.example`** to **`backend/.env`** and adjust. There are **no required** environment variables for captions, crawling, or scheduling. Facebook/Instagram posting uses Playwright with a normal login session, not the Graph API.
+
+## Production (same machine)
+From repo root (installs browsers under `.playwright-browsers` if you set `PLAYWRIGHT_BROWSERS_PATH`):
+```bash
+export PLAYWRIGHT_BROWSERS_PATH="$(pwd)/.playwright-browsers"
+sh build.sh   # pip + playwright --with-deps chromium
+sh start.sh   # Gunicorn + backend/wsgi.py
 ```
-# Optional — Flask session cookie signing (a default is built into the app if unset)
-# SECRET_KEY=long-random-string
-```
-
-There are **no required environment variables** for captions, crawling, or scheduling. Facebook/Instagram posting uses Playwright like a logged-in user, not the Graph API, so **no Meta app tokens** are configured in this repo.
-
-Run: `python app.py` from `/backend`, then open **http://localhost:5000** (the server serves the dashboard).
 
 ## Deploy (Render / Railpack)
 
-The repo root includes **`requirements.txt`** (includes `backend/requirements.txt`), **`start.sh`**, and **`render.yaml`** so hosts can detect Python and how to start the app.
+The repo root includes **`requirements.txt`**, **`build.sh`**, **`start.sh`**, and **`render.yaml`**.
 
-- **Build command** (if not using `render.yaml`):  
-  `pip install -r requirements.txt && cd backend && python -m playwright install chromium`
-- **Start command**: `sh start.sh` (runs `backend/app.py`; honors **`PORT`** and **`FLASK_DEBUG=0`** on the server).
+- **Build:** `sh build.sh` (or your host’s equivalent: pip + `playwright install --with-deps chromium`)
+- **Start:** `sh start.sh` (Gunicorn, honors **`PORT`**, **`FLASK_DEBUG=0`**, **`PLAYWRIGHT_BROWSERS_PATH`**)
 
-**Playwright/Chromium** on cloud hosts may need extra OS libraries; if the build fails on browser install, use a Dockerfile or your platform’s Playwright docs. Stealth posting is optional for health checks — the API and dashboard still run.
+**Playwright/Chromium** on cloud hosts may need OS libraries; `start.sh` runs `playwright install --with-deps` so slim images still get shared libs. Use a persistent disk for **`DATABASE_PATH`** and **`PROFILES_DIR`** if you need data to survive restarts.
 
 ## License
 MIT
