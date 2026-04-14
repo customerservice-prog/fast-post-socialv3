@@ -45,9 +45,14 @@ def _normalize_facebook_page_url(url: str) -> str:
 
 
 class StealthPoster:
-    def __init__(self, db, headless: bool = False):
+    def __init__(self, db, headless: Optional[bool] = None):
         self.db = db
+        if headless is None:
+            # Docker/Render have no X server; headed mode needs DISPLAY or xvfb-run.
+            headed = os.getenv("FB_HEADED", "").lower() in ("1", "true", "yes")
+            headless = not headed
         self.headless = headless
+        logger.info("[StealthPoster] Chromium headless=%s (set FB_HEADED=1 locally to show browser)", headless)
 
     @staticmethod
     def _env_leave_browser_open() -> bool:
