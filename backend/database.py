@@ -6,6 +6,7 @@ SQLite database for accounts, posts, crawl data, and analytics
 import sqlite3
 import json
 import os
+from pathlib import Path
 from datetime import date
 from typing import Optional, List, Dict
 
@@ -55,6 +56,7 @@ CREATE TABLE IF NOT EXISTS analytics (
 class Database:
     def __init__(self, db_path: str = DB_PATH):
         self.db_path = db_path
+        Path(db_path).resolve().parent.mkdir(parents=True, exist_ok=True)
         self.init_db()
 
     def get_conn(self):

@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 _stealth = Stealth()
 
 PROFILES_DIR = Path(os.getenv("PROFILES_DIR", "./browser_profiles"))
-PROFILES_DIR.mkdir(exist_ok=True)
+PROFILES_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _normalize_facebook_page_url(url: str) -> str:
