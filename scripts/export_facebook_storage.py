@@ -1,10 +1,21 @@
 """
 Export Playwright storage_state after you log in to Facebook locally (headed browser).
 
-Usage (from repo root, with backend venv active and Playwright browsers installed):
-  python scripts/export_facebook_storage.py path/to/facebook_state.json
+Usage — you must run this from your FastPost project folder (not C:\\Windows\\System32).
 
-Then in the FastPost dashboard: Accounts → Session JSON → paste file contents → Save.
+  cd path\\to\\fast-post-socialv3
+  python scripts/export_facebook_storage.py
+  python scripts/export_facebook_storage.py C:\\Temp\\my_fb_state.json
+
+Windows (PowerShell): launcher cds to the repo for you:
+
+  .\\scripts\\export_facebook_storage.ps1
+
+Or full path:
+
+  & \"C:\\Users\\YOU\\Desktop\\fast-post-socialv3\\scripts\\export_facebook_storage.ps1\"
+
+Then in the FastPost dashboard: Accounts → Session JSON → paste the ENTIRE file contents → Save.
 
 The JSON is sensitive (session cookies). Do not commit it or share it.
 """

@@ -259,8 +259,10 @@
       </div>
       <div class="modal-body">
         <p class="muted section-sub" style="margin-top:0;">
-          Run <code>python scripts/export_facebook_storage.py</code> on your computer after logging in to Facebook.
-          Open the generated JSON file, copy all text, and paste it here.
+          On your PC, run the export script from the <strong>FastPost project folder</strong> (not <code>System32</code>).
+          Windows: <code>.\scripts\export_facebook_storage.ps1</code> or <code>cd</code> to the repo, then
+          <code>python scripts\export_facebook_storage.py</code>. Open the saved <code>.json</code> file in Notepad,
+          copy <strong>all</strong> text (starts with <code>{&quot;cookies&quot;</code>), paste here.
         </p>
         <div class="form-group">
           <label for="sessionJsonInput">Storage JSON</label>

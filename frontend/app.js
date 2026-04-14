@@ -530,22 +530,48 @@ function closeSessionModal() {
   document.getElementById('sessionModal')?.classList.add('hidden');
 }
 
+/**
+ * Normalize pasted Playwright storage: BOM, markdown fences, accidental extra text.
+ */
+function parsePlaywrightStoragePaste(text) {
+  let s = String(text).replace(/^\uFEFF/, '').trim();
+  const fence = s.match(/^```(?:json)?\s*\r?\n?([\s\S]*?)\r?\n?```\s*$/im);
+  if (fence) s = fence[1].trim();
+  try {
+    return JSON.parse(s);
+  } catch (e1) {
+    const i = s.indexOf('{');
+    const j = s.lastIndexOf('}');
+    if (i >= 0 && j > i) {
+      try {
+        return JSON.parse(s.slice(i, j + 1));
+      } catch {
+        /* fall through */
+      }
+    }
+    throw e1;
+  }
+}
+
 async function savePlaywrightSessionFromModal() {
   const id = sessionModalAccountId;
-  const raw = document.getElementById('sessionJsonInput')?.value?.trim() || '';
+  const raw = document.getElementById('sessionJsonInput')?.value || '';
   if (!id) {
     showToast('No account selected.', 'error');
     return;
   }
-  if (!raw) {
+  if (!String(raw).trim()) {
     showToast('Paste the JSON first.', 'error');
     return;
   }
   let parsed;
   try {
-    parsed = JSON.parse(raw);
+    parsed = parsePlaywrightStoragePaste(raw);
   } catch {
-    showToast('Invalid JSON — check the file contents.', 'error');
+    showToast(
+      'Invalid JSON. Use the full file from export (starts with {"cookies"). On Windows, run the script from the project folder — see Session JSON help text.',
+      'error',
+    );
     return;
   }
   try {
