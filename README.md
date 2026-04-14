@@ -25,7 +25,7 @@ See **[NO_API_KEYS.md](NO_API_KEYS.md)** for a short checklist and **`.env.examp
 - Anti-detection helpers: playwright-stealth, jittered timing, human-like interaction patterns
 - Multi-account support (Facebook, Instagram labels; posting uses your logged-in session)
 - SQLite + optional disk paths for production persistence
-- Deploy-friendly: root `requirements.txt`, `start.sh`, `build.sh`, `render.yaml`
+- Deploy-friendly: root `requirements.txt`, `start.sh`, `build.sh`, **`railway.json`** (Railway / Railpack), optional `render.yaml` (Render)
 
 ## Tech Stack
 - Frontend: HTML5, CSS3, Vanilla JS
@@ -62,16 +62,31 @@ sh build.sh   # pip + playwright --with-deps chromium
 sh start.sh   # Gunicorn + backend/wsgi.py
 ```
 
-## Deploy (Render / Railpack)
+## Deploy (Railway — recommended)
 
-The repo root includes **`requirements.txt`**, **`build.sh`**, **`start.sh`**, and **`render.yaml`**.
+The repo includes **`railway.json`**: **build** = `sh build.sh`, **start** = `sh start.sh`, health check = **`GET /api/health`**.
 
-- **Build:** `sh build.sh` (or your host’s equivalent: pip + `playwright install --with-deps chromium`)
-- **Start:** `sh start.sh` (Gunicorn, honors **`PORT`**, **`FLASK_DEBUG=0`**, **`PLAYWRIGHT_BROWSERS_PATH`**)
+1. **New Railway project** → deploy from this GitHub repo (Railpack will detect Python).
+2. **Variables** (service → Variables), set at least:
+   - **`PLAYWRIGHT_BROWSERS_PATH`** = `/app/.playwright-browsers` (matches `start.sh` + build; keeps Chromium in the image path)
+   - **`FLASK_DEBUG`** = `0`
+   - **`FB_HEADED`** = `0` (or omit — do **not** set `1` on the server; there is no X server)
+3. **Persistence:** add a **volume** mounted e.g. at **`/data`**, then set:
+   - **`DATABASE_PATH`** = `/data/fastpost.db`
+   - **`PROFILES_DIR`** = `/data/browser_profiles`  
+   (Without a volume, SQLite and browser login profiles are lost on redeploy.)
 
-**Playwright/Chromium** on cloud hosts may need OS libraries; `start.sh` runs `playwright install --with-deps` so slim images still get shared libs. Use a persistent disk for **`DATABASE_PATH`** and **`PROFILES_DIR`** if you need data to survive restarts.
+**`PORT`** is injected by Railway; `start.sh` already uses it. Optional: **`SECRET_KEY`** for Flask (not an API key).
 
-**Headless / “headed browser without X server”:** Posting always uses **headless** Chromium on Render (and whenever `RENDER`/`CI`/etc. is set). Do **not** set **`FB_HEADED=1`** in production. `render.yaml` pins **`FB_HEADED=0`**. Smoke-test with `make verify-playwright` or `python scripts/verify_playwright_headless.py` after installing Playwright.
+**Playwright:** `build.sh` installs deps + Chromium; `start.sh` runs `playwright install --with-deps chromium` at boot so slim runtimes still get system libraries.
+
+**Headless:** The app detects **`RAILWAY_ENVIRONMENT`** / **`CI`** / **`RENDER`** and forces headless Chromium. If you still see X11 errors, remove **`FB_HEADED`** from Variables or set it to **`0`**.
+
+Smoke-test locally: `make verify-playwright` or `python scripts/verify_playwright_headless.py`.
+
+## Deploy (Render or other hosts)
+
+Same **build** / **start** commands as above. Optional **`render.yaml`** is for Render Blueprints only (not used by Railway). Pin **`FB_HEADED=0`** in the host UI if you add variables manually.
 
 ## License
 MIT

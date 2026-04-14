@@ -41,6 +41,7 @@ def _running_in_paas() -> bool:
         or os.getenv("KUBERNETES_SERVICE_HOST")
         or os.getenv("RAILWAY_ENVIRONMENT")
         or os.getenv("RAILWAY_PUBLIC_DOMAIN")
+        or os.getenv("RAILWAY_SERVICE_ID")
         or os.getenv("FLY_APP_NAME")
     )
 
