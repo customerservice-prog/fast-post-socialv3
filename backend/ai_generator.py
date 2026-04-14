@@ -2,6 +2,9 @@
 FastPost Social v3 - Local Content Generator
 Builds 3 daily post drafts from your crawl data — no external AI APIs.
 Post types: Morning Promo, Mid-day Tip, Evening Social Proof
+
+Captions are written for longer reads, topical depth, and natural keyword use
+(from your crawl) so posts feel specific to the business and support discovery.
 """
 
 import re
@@ -66,11 +69,14 @@ class AIContentGenerator:
         images = [i for i in cd.get("image_descriptions") or [] if i]
         samples = [t for t in cd.get("text_samples") or [] if t]
         summary = (cd.get("summary") or "").strip()
-        snippet = ""
+        snippet_a = ""
+        snippet_b = ""
         if samples:
-            snippet = self._clean_snippet(samples[0], 220)
+            snippet_a = self._clean_snippet(samples[0], 420)
+            if len(samples) > 1:
+                snippet_b = self._clean_snippet(samples[1], 320)
         elif summary:
-            snippet = self._clean_snippet(summary, 220)
+            snippet_a = self._clean_snippet(summary, 480)
         return {
             "business_name": business_name.strip() or "Our business",
             "business_url": business_url.strip(),
@@ -78,7 +84,8 @@ class AIContentGenerator:
             "prices": prices[:5],
             "headings": headings[:8],
             "images": images[:6],
-            "snippet": snippet,
+            "snippet_a": snippet_a,
+            "snippet_b": snippet_b,
         }
 
     def _clean_snippet(self, text: str, max_len: int) -> str:
@@ -92,35 +99,145 @@ class AIContentGenerator:
             return ""
         return options[seed % len(options)]
 
-    def _service_line(self, ctx: Dict, seed: int) -> str:
+    def _topic_phrases(self, ctx: Dict, seed: int, limit: int = 5) -> List[str]:
+        """Short topical phrases from crawl (for natural repetition / discovery)."""
+        raw = [ctx["business_name"]] + ctx["services"] + ctx["headings"]
+        seen = set()
+        out = []
+        for r in raw:
+            t = (r or "").strip()
+            if len(t) < 3:
+                continue
+            key = t.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(t)
+            if len(out) >= limit:
+                break
+        if len(out) < 2:
+            out.append("local service")
+        return out
+
+    def _weave_topics_paragraph(self, ctx: Dict, seed: int) -> str:
+        """One dense paragraph that names real offerings from the crawl."""
+        name = ctx["business_name"]
+        topics = self._topic_phrases(ctx, seed, 6)
         svcs = ctx["services"]
-        if len(svcs) >= 2:
-            a, b = self._pick(svcs, seed), self._pick(svcs, seed + 3)
-            if a != b:
-                return f"From {a} to {b}, we help you get it right."
-        if svcs:
-            return f"Ask us about {svcs[0]} — we'd love to help."
-        if ctx["headings"]:
-            return f"Focused on: {ctx['headings'][0]}."
-        return "Reach out and we'll walk you through options."
+        heads = ctx["headings"]
+
+        if len(svcs) >= 3:
+            a, b, c = self._pick(svcs, seed), self._pick(svcs, seed + 1), self._pick(svcs, seed + 2)
+            uniq = []
+            for x in (a, b, c):
+                if x not in uniq:
+                    uniq.append(x)
+            if len(uniq) >= 2:
+                joined = ", ".join(uniq[:-1]) + f", and {uniq[-1]}"
+                return (
+                    f"If you're comparing options, {name} focuses on real-world fit—not just price on a page. "
+                    f"We regularly help customers thinking through {joined}. "
+                    f"Our team talks through timing, what's included, and what to plan for so there are fewer surprises on the day you need everything to go smoothly."
+                )
+
+        if topics and len(topics) >= 2:
+            t1, t2 = topics[0], topics[min(1, len(topics) - 1)]
+            if t1.lower() == name.lower():
+                t1 = topics[min(1, len(topics) - 1)]
+                t2 = topics[min(2, len(topics) - 1)] if len(topics) > 2 else "your project"
+            return (
+                f"Whether your priority is {t1.lower()} or {t2.lower()}, {name} is built around clear answers and steady communication. "
+                f"We know these decisions are easier when you understand choices upfront—so we explain tradeoffs in plain language and help you pick what matches your timeline and budget."
+            )
+
+        if heads:
+            h = self._pick(heads, seed)
+            return (
+                f"A question we hear often is tied to “{h}.” "
+                f"At {name}, we use that kind of detail to guide recommendations, because the right setup depends on your goals—not a one-size-fits-all template."
+            )
+
+        return (
+            f"At {name}, we focus on helpful planning, honest expectations, and follow-through. "
+            f"If you're not sure where to start, tell us what you're trying to accomplish and we'll map a simple next step."
+        )
+
+    def _bullet_points(self, ctx: Dict, seed: int) -> str:
+        lines = []
+        for i, s in enumerate(ctx["services"][:3]):
+            lines.append(f"• {s}: what to ask about, what's typically included, and how far in advance to book.")
+        if not lines and ctx["headings"]:
+            for h in ctx["headings"][:3]:
+                lines.append(f"• {h} — a practical detail people overlook until the last minute.")
+        if not lines:
+            lines = [
+                "• How to compare quotes fairly (apples-to-apples).",
+                "• What to confirm before you commit (delivery, pickup, timing).",
+                "• A realistic timeline so you're not rushing the week of your event or project.",
+            ]
+        return "\n".join(lines[:3])
+
+    def _facebook_semantic_footer(self, ctx: Dict, platform: str, seed: int) -> str:
+        """Short, readable line with topical words — not hashtag spam."""
+        if platform.lower() not in ("facebook", "fb", "both"):
+            return ""
+        raw = [x for x in (ctx["services"] + ctx["headings"]) if x and str(x).strip()]
+        if len(raw) < 2:
+            return ""
+        pick = [self._pick(raw, seed + 11 + i) for i in range(min(3, len(raw)))]
+        uniq = []
+        for p in pick:
+            if p not in uniq:
+                uniq.append(p)
+        tail = ", ".join(x.lower() for x in uniq[:3])
+        return (
+            f"\n\nIf you're researching {tail}, save this post and come back when you're ready—"
+            f"we're happy to point you in the right direction."
+        )
 
     def _morning_promo(self, ctx: Dict, platform: str, seed: int) -> Tuple[str, str]:
         name = ctx["business_name"]
         opens = [
-            f"Good morning! ☀️ {name} is here when you're ready to plan your next step.",
-            f"Rise and shine! 🌤️ Start the day with {name} — local, friendly, and ready to help.",
-            f"Morning crew! 👋 {name} has openings and answers — let's make today easier.",
+            f"Good morning! If today is the day you finally move your plans forward, {name} is a message away.",
+            f"Rise and shine — busy weeks start with one clear decision. {name} helps you cut through noise with straightforward guidance.",
+            f"Morning! Planning something coming up? {name} works with locals who want fewer surprises and a team that actually responds.",
         ]
-        body = self._service_line(ctx, seed)
-        price_hint = ""
+        mid = self._weave_topics_paragraph(ctx, seed)
+        bullets_intro = "A few things worth thinking through early:"
+        bullets = self._bullet_points(ctx, seed)
+        price_block = ""
         if ctx["prices"]:
-            price_hint = f" See current offers from {ctx['prices'][0]}."
+            price_block = (
+                f"\n\nCurrent spotlight: offers around {ctx['prices'][0]} (details can change—ask us what's available for your dates)."
+            )
         ctas = [
-            "Message us to reserve your spot.",
-            "Call or DM — we'll get you scheduled.",
-            "Tap in — we reply fast.",
+            "Message us with your date and headcount—we'll reply with next steps.",
+            "Call or DM with what you're planning; we'll help you narrow options fast.",
+            "Comment “PLAN” and tell us what you're working on—we'll follow up.",
         ]
-        caption = f"{self._pick(opens, seed)}\n\n{body}{price_hint}\n\n{self._pick(ctas, seed + 1)}"
+        save_line = self._pick(
+            [
+                "Save this for later if you're still in research mode.",
+                "Bookmark this post if you're comparing vendors this month.",
+                "If you're not ready today, save it—good planning beats last-minute stress.",
+            ],
+            seed,
+        )
+        parts = [
+            self._pick(opens, seed),
+            "",
+            mid,
+            "",
+            bullets_intro,
+            bullets,
+            price_block,
+            "",
+            self._pick(ctas, seed + 1),
+            "",
+            save_line,
+        ]
+        caption = "\n".join(p for p in parts if p is not None)
+        caption = caption + self._facebook_semantic_footer(ctx, platform, seed)
         caption = self._append_platform_tail(caption, ctx, platform, seed)
         img = self._image_prompt(name, ctx, "bright, welcoming, professional local business scene")
         return caption, img
@@ -130,28 +247,45 @@ class AIContentGenerator:
         tips = [
             (
                 "Quick tip: book early for the best selection and calmer planning.",
-                "Early planning saves stress and money.",
+                "When you reserve sooner, you usually get better availability, cleaner logistics, and more time to adjust if something changes.",
             ),
             (
-                "Quick tip: ask what's included before you compare quotes — apples to apples matters.",
-                "Clear questions get clear answers.",
+                "Quick tip: before you compare quotes, list what “included” means for you.",
+                "Delivery windows, setup, teardown, backup plans, and damage policies are where “cheap” can become expensive—clarity beats a low number that hides gaps.",
             ),
             (
-                "Quick tip: share your headcount and date up front — we can match you faster.",
-                "Details help us help you.",
+                "Quick tip: share your headcount, date, and access details up front.",
+                "Those three data points prevent the back-and-forth that slows everything down—and they help vendors recommend the right fit the first time.",
             ),
         ]
-        tip_title, tip_sub = tips[seed % len(tips)]
-        extra = ""
-        if ctx["snippet"]:
-            extra = f"\n\nIn our own words: {ctx['snippet']}"
-        elif ctx["headings"]:
-            extra = f"\n\nPopular topic: {ctx['headings'][0]}."
-        caption = (
-            f"💡 {tip_title}\n{tip_sub}\n\n"
-            f"{name} is happy to guide you.{extra}\n\n"
-            f"Questions? Drop a comment or DM."
+        tip_title, tip_body = tips[seed % len(tips)]
+
+        apply_block = (
+            f"How this applies to {name}: we see the smoothest outcomes when customers know what matters most to them "
+            f"(budget ceiling, must-haves, nice-to-haves). If you bring that clarity, we can recommend a path that doesn't waste your time."
         )
+
+        story = ""
+        if ctx["snippet_a"]:
+            story = f"\n\nFrom our website (in plain language):\n“{ctx['snippet_a']}”"
+            if ctx["snippet_b"]:
+                story += f"\n\nRelated detail: {ctx['snippet_b']}"
+        elif ctx["headings"]:
+            story = f"\n\nA page topic we get questions about: {ctx['headings'][0]}. If that sounds like you, tell us your situation—we'll translate it into options."
+
+        checklist = (
+            "\n\nMini checklist before you commit:\n"
+            "• Confirm the date + window\n"
+            "• Confirm what's included vs add-ons\n"
+            "• Confirm contingency if weather or access changes"
+        )
+
+        caption = (
+            f"Tip: {tip_title}\n\n{tip_body}\n\n{apply_block}{story}{checklist}\n\n"
+            f"Drop a comment with your biggest question—engagement helps us prioritize what to explain next.\n\n"
+            f"— {name}"
+        )
+        caption = caption + self._facebook_semantic_footer(ctx, platform, seed + 2)
         caption = self._append_platform_tail(caption, ctx, platform, seed + 2)
         img = self._image_prompt(name, ctx, "helpful how-to vibe, clean and friendly")
         return caption, img
@@ -161,35 +295,41 @@ class AIContentGenerator:
         stories = [
             (
                 "Tonight we're grateful for everyone who trusted us this season.",
-                "Your events and projects keep our team motivated.",
+                "Your events, projects, and “last-minute saves” are why we keep showing up with care—not just equipment or service, but follow-through.",
             ),
             (
-                "Love seeing our neighbors choose local. Thank you for the support.",
-                "Every referral and kind word matters.",
+                "Love seeing neighbors choose local. Thank you for the support.",
+                "When you pick a local team, you're not buying a transaction—you're buying accountability. We feel that responsibility every day.",
             ),
             (
                 "Wrapping the day thankful for another round of great customers.",
-                "We don't take your trust lightly.",
+                "We don't take your trust lightly. Good reviews and referrals don't come from hype; they come from doing the boring details right.",
             ),
         ]
         s1, s2 = stories[seed % len(stories)]
+
+        depth = self._weave_topics_paragraph(ctx, seed + 5)
+
         questions = [
-            "What's the next milestone you're planning for?",
-            "What would make your next project a home run?",
+            "What's the next milestone you're planning for—and what's stressing you most about it?",
+            "If you could remove one headache from your planning process, what would it be?",
             "Tell us: what's one thing you'd love to check off your list this month?",
         ]
+
         caption = (
-            f"🌙 {s1}\n{s2}\n\n"
+            f"{s1}\n\n{s2}\n\n{depth}\n\n"
             f"— {name}\n\n"
-            f"{self._pick(questions, seed)}"
+            f"{self._pick(questions, seed)}\n\n"
+            f"If this resonates, share it with someone who's in planning mode. Word-of-mouth is how local businesses like ours stay healthy."
         )
+        caption = caption + self._facebook_semantic_footer(ctx, platform, seed + 4)
         caption = self._append_platform_tail(caption, ctx, platform, seed + 4)
         img = self._image_prompt(name, ctx, "warm community evening feel, authentic local business")
         return caption, img
 
     def _append_platform_tail(self, caption: str, ctx: Dict, platform: str, seed: int) -> str:
         pl = platform.lower()
-        if pl in ("instagram", "ig"):
+        if pl in ("instagram", "ig", "both"):
             tags = self._build_hashtags(ctx["business_name"], ctx["services"], seed)
             if tags:
                 return f"{caption.rstrip()}\n\n{tags}"
@@ -202,10 +342,10 @@ class AIContentGenerator:
             w = re.sub(r"[^a-zA-Z0-9]+", "", r.replace(" ", "").lower())
             if len(w) >= 3 and w not in tags:
                 tags.append(f"#{w[:30]}")
-            if len(tags) >= 8:
+            if len(tags) >= 10:
                 break
         if not tags:
-            tags = ["#localbusiness", "#smallbusiness"]
+            tags = ["#localbusiness", "#smallbusiness", "#community"]
         return " ".join(tags)
 
     def _image_prompt(self, business_name: str, ctx: Dict, mood: str) -> str:

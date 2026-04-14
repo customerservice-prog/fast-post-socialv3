@@ -10,6 +10,29 @@
   </head>
   <body>
 
+  <!-- Full-page notice: shown on every load until Enter / Continue (public “live” visits). -->
+  <div id="constructionOverlay" class="construction-overlay" role="dialog" aria-modal="true" aria-labelledby="constructionTitle" aria-describedby="constructionDesc">
+    <div class="construction-panel">
+      <p class="construction-badge">Under construction</p>
+      <h2 id="constructionTitle" class="construction-title">FastPost Social — coming soon</h2>
+      <p id="constructionDesc" class="construction-lead">
+        We’re finishing the experience before we open the doors to everyone. Here’s what this app is being built to do:
+      </p>
+      <ul class="construction-list">
+        <li>Turn your website into <strong>daily draft posts</strong> you can edit and approve—no blank-page stress.</li>
+        <li>Keep a clear <strong>queue</strong> for promos, tips, and community-style posts tuned to your business.</li>
+        <li>Post to <strong>Facebook / Instagram</strong> with human-reviewed captions (you stay in control).</li>
+        <li>Bring back <strong>analytics-friendly, topic-rich copy</strong> so posts sound like you—not generic filler.</li>
+      </ul>
+      <p class="construction-hint">
+        Press <kbd class="kbd">Enter</kbd> or use the button below to open the dashboard.
+      </p>
+      <button type="button" class="btn btn-primary construction-cta" id="constructionEnterBtn" autofocus>
+        Continue to site
+      </button>
+    </div>
+  </div>
+
   <!-- ===== SIDEBAR ===== -->
   <aside class="sidebar">
     <div class="sidebar-logo">

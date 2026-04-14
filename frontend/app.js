@@ -17,6 +17,8 @@ let editingPostId = null;
 let accounts = [];
 
 document.addEventListener('DOMContentLoaded', () => {
+  initConstructionOverlay();
+
   document.getElementById('todayDate').textContent = new Date().toLocaleDateString('en-US', {
     weekday: 'long', month: 'long', day: 'numeric',
   });
@@ -44,6 +46,40 @@ document.addEventListener('DOMContentLoaded', () => {
   loadDashboard();
   checkScheduler();
 });
+
+/**
+ * Shown on every full page load / refresh. Dismiss with Enter or Continue.
+ */
+function initConstructionOverlay() {
+  const el = document.getElementById('constructionOverlay');
+  if (!el) return;
+
+  const dismiss = () => {
+    el.classList.add('hidden');
+    el.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('construction-locked');
+  };
+
+  document.body.classList.add('construction-locked');
+  el.classList.remove('hidden');
+  el.setAttribute('aria-hidden', 'false');
+
+  const btn = document.getElementById('constructionEnterBtn');
+  btn?.focus();
+
+  const onEnter = (e) => {
+    if (e.key !== 'Enter') return;
+    if (el.classList.contains('hidden')) return;
+    e.preventDefault();
+    dismiss();
+    document.removeEventListener('keydown', onEnter);
+  };
+  document.addEventListener('keydown', onEnter);
+  btn?.addEventListener('click', () => {
+    dismiss();
+    document.removeEventListener('keydown', onEnter);
+  });
+}
 
 function navigateTo(page) {
   currentPage = page;
