@@ -15,6 +15,8 @@ See **[NO_API_KEYS.md](NO_API_KEYS.md)** for a short checklist and **`.env.examp
 - frontend/index.html — Dashboard UI
 - frontend/style.css — Dashboard styles
 - frontend/app.js — Dashboard logic
+- `Makefile` — quick targets on macOS / Linux / Git Bash (`make help`)
+- `scripts/dev.ps1` — same idea on Windows PowerShell
 
 ## Features
 - Builds **three draft posts per account per day** from crawled website content (local templates, no cloud LLM)
@@ -44,6 +46,11 @@ cd backend && python app.py
 ```
 
 Open **http://localhost:5000** (Flask serves the dashboard from the repo).
+
+### One-command shortcuts
+
+- **Unix / Git Bash / WSL:** `make help` then `make dev` (or `make install`, `make playwright`).
+- **Windows PowerShell:** `.\scripts\dev.ps1 help` then `.\scripts\dev.ps1 dev`.
 
 Optional: copy **`.env.example`** to **`backend/.env`** and adjust. There are **no required** environment variables for captions, crawling, or scheduling. Facebook/Instagram posting uses Playwright with a normal login session, not the Graph API.
 
