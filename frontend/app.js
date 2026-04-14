@@ -450,8 +450,15 @@ async function addAccount(e) {
     page_url: document.getElementById('pageUrl').value,
   };
   try {
-    await apiFetch('/accounts', { method: 'POST', body: JSON.stringify(payload) });
-    showToast('Account linked and site crawled.', 'success');
+    const res = await apiFetch('/accounts', { method: 'POST', body: JSON.stringify(payload) });
+    if (res.crawl_ok === false) {
+      showToast(
+        (res.message || 'Account saved.') + (res.crawl_error ? ' — ' + res.crawl_error : ''),
+        'info',
+      );
+    } else {
+      showToast(res.message || 'Account linked and site crawled.', 'success');
+    }
     e.target.reset();
     await loadAccounts();
     loadDashboard();

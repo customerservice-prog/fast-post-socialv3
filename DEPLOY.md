@@ -24,7 +24,7 @@ Pinned configuration in this repo (commit and redeploy from **`main`**):
 | `DATABASE_PATH` | `/data/fastpost.db` (with volume) |
 | `PROFILES_DIR` | `/data/browser_profiles` (with volume) |
 
-3. **Volume:** mount at **`/data`** so SQLite + browser profiles survive redeploys.
+3. **Volume:** mount at **`/data`** and set **`DATABASE_PATH=/data/fastpost.db`**. Without this, SQLite lives on ephemeral disk and **accounts disappear on every redeploy** (the app will log the DB path at startup).
 4. **Posting:** runs **headless** on the server — no browser window on your PC (see Settings in the app).
 
 ## Smoke checks (after deploy)

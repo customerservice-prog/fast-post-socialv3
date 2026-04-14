@@ -11,7 +11,10 @@ from datetime import date
 from typing import Optional, List, Dict
 
 
-DB_PATH = os.getenv("DATABASE_PATH", "fastpost.db")
+# Default DB path is next to this file so it does not depend on process cwd (Gunicorn, Railway, etc.).
+_BACKEND_DIR = Path(__file__).resolve().parent
+_DEFAULT_SQLITE = str(_BACKEND_DIR / "fastpost.db")
+DB_PATH = os.getenv("DATABASE_PATH", _DEFAULT_SQLITE)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (
@@ -60,8 +63,13 @@ class Database:
         self.init_db()
 
     def get_conn(self):
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        try:
+            conn.execute("PRAGMA journal_mode = WAL")
+        except sqlite3.OperationalError:
+            pass
         return conn
 
     def init_db(self):

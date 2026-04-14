@@ -28,6 +28,7 @@ CORS(app, supports_credentials=True)
 
 # Initialize core components
 db = Database()
+logger.info("SQLite path (set DATABASE_PATH for a persistent volume on Railway): %s", db.db_path)
 crawler = BusinessCrawler()
 ai_gen = AIContentGenerator()
 scheduler = PostScheduler(db=db, ai_gen=ai_gen)
@@ -116,26 +117,74 @@ def get_dashboard():
     )
 
 
+def _empty_crawl_payload(business_url: str, err: str) -> dict:
+    """Minimal crawl shape if the live crawl throws (account still saved)."""
+    u = (business_url or "").strip()
+    if u and not u.startswith("http"):
+        u = "https://" + u
+    return {
+        "base_url": u or "",
+        "business_name": "",
+        "pages_count": 0,
+        "services": [],
+        "prices": [],
+        "key_headings": [],
+        "image_descriptions": [],
+        "text_samples": [],
+        "summary": "",
+        "crawl_error": err[:500],
+    }
+
+
 @app.route("/api/accounts", methods=["POST"])
 def add_account():
     """Link a new social media account"""
-    data = request.json
+    data = request.get_json(silent=True) or {}
     required = ["platform", "page_url", "business_url", "business_name"]
-    if not all(k in data for k in required):
+    if not isinstance(data, dict) or not all(k in data for k in required):
         return jsonify({"error": "Missing required fields"}), 400
 
+    def _s(v) -> str:
+        if v is None:
+            return ""
+        return str(v).strip()
+
+    fields = {k: _s(data.get(k)) for k in required}
+    if not all(fields[k] for k in required):
+        return jsonify({"error": "All fields must be non-empty"}), 400
+
     account_id = db.add_account(
-        platform=data["platform"],
-        page_url=data["page_url"],
-        business_url=data["business_url"],
-        business_name=data["business_name"],
+        platform=fields["platform"],
+        page_url=fields["page_url"],
+        business_url=fields["business_url"],
+        business_name=fields["business_name"],
         session_data=None,
     )
-    # Trigger initial crawl
-    crawl_result = crawler.crawl(data["business_url"])
+    crawl_ok = True
+    crawl_err = ""
+    try:
+        crawl_result = crawler.crawl(fields["business_url"])
+    except Exception as e:
+        logger.exception("Initial crawl failed for account_id=%s", account_id)
+        crawl_ok = False
+        crawl_err = str(e) or "crawl failed"
+        crawl_result = _empty_crawl_payload(fields["business_url"], crawl_err)
+
     db.update_crawl_data(account_id, crawl_result)
 
-    return jsonify({"id": account_id, "message": "Account linked and site crawled"}), 201
+    if crawl_ok:
+        return jsonify({"id": account_id, "message": "Account linked and site crawled", "crawl_ok": True}), 201
+    return (
+        jsonify(
+            {
+                "id": account_id,
+                "message": "Account saved; initial crawl failed — use Re-crawl or check the business URL.",
+                "crawl_ok": False,
+                "crawl_error": crawl_err,
+            }
+        ),
+        201,
+    )
 
 
 @app.route("/api/accounts/<int:account_id>", methods=["DELETE"])
