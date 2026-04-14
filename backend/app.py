@@ -8,6 +8,7 @@ import json
 import logging
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from datetime import date
+from pathlib import Path
 from flask import Flask, request, jsonify, send_from_directory, abort
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -15,7 +16,7 @@ from database import Database
 from crawler import BusinessCrawler
 from ai_generator import AIContentGenerator
 from scheduler import PostScheduler
-from stealth_poster import StealthPoster
+from stealth_poster import StealthPoster, PROFILES_DIR, UPLOADED_STORAGE_NAME
 
 load_dotenv()
 
@@ -70,7 +71,20 @@ def _account_for_api(raw: dict) -> dict:
     else:
         out["status_label"] = "Crawl needs attention"
         out["next_step_hint"] = "Try Re-crawl or confirm your business URL is reachable."
+    aid = raw.get("id")
+    try:
+        iid = int(aid) if aid is not None else None
+    except (TypeError, ValueError):
+        iid = None
+    out["has_playwright_session"] = bool(
+        iid is not None
+        and (PROFILES_DIR / f"profile_{iid}" / UPLOADED_STORAGE_NAME).is_file()
+    )
     return out
+
+
+def _playwright_storage_file(account_id: int) -> Path:
+    return (PROFILES_DIR / f"profile_{account_id}").resolve() / UPLOADED_STORAGE_NAME
 
 
 @app.route("/")
@@ -97,7 +111,7 @@ def frontend_static(filename):
 def get_accounts():
     """Return all linked social media accounts"""
     accounts = [_account_for_api(dict(a)) for a in db.get_all_accounts()]
-    return jsonify({"accounts": accounts})
+    return jsonify({"accounts": accounts, "posting_headless": bool(poster.headless)})
 
 
 @app.route("/api/dashboard", methods=["GET"])
@@ -192,6 +206,45 @@ def delete_account(account_id):
     """Remove a linked account"""
     db.delete_account(account_id)
     return jsonify({"message": "Account removed"})
+
+
+@app.route("/api/accounts/<int:account_id>/playwright-storage", methods=["GET"])
+def playwright_storage_status(account_id):
+    """Whether an uploaded Playwright storage_state JSON exists (for headless posting)."""
+    if not db.get_account(account_id):
+        return jsonify({"error": "Account not found"}), 404
+    path = _playwright_storage_file(account_id)
+    return jsonify({"has_session": path.is_file()})
+
+
+@app.route("/api/accounts/<int:account_id>/playwright-storage", methods=["POST"])
+def playwright_storage_save(account_id):
+    """Save Playwright storage_state JSON (cookies + origins) for headless cloud posting."""
+    if not db.get_account(account_id):
+        return jsonify({"error": "Account not found"}), 404
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Body must be a JSON object (Playwright storage state)"}), 400
+    cookies = data.get("cookies")
+    if not isinstance(cookies, list) or len(cookies) == 0:
+        return jsonify({"error": "Expected a non-empty 'cookies' array (Playwright storage format)"}), 400
+    path = _playwright_storage_file(account_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    logger.info("Saved Playwright storage for account_id=%s at %s", account_id, path)
+    return jsonify({"message": "Session saved", "has_session": True})
+
+
+@app.route("/api/accounts/<int:account_id>/playwright-storage", methods=["DELETE"])
+def playwright_storage_clear(account_id):
+    """Remove uploaded Playwright storage for this account."""
+    if not db.get_account(account_id):
+        return jsonify({"error": "Account not found"}), 404
+    path = _playwright_storage_file(account_id)
+    if path.is_file():
+        path.unlink()
+    return jsonify({"message": "Session cleared", "has_session": False})
 
 
 # ─── CRAWL ROUTES ────────────────────────────────────────────────────────────
@@ -306,8 +359,9 @@ def post_now(post_id):
     if not account:
         return jsonify({"error": "Account not found"}), 404
 
-    # Allow long Facebook login + composer (see FB_LOGIN_WAIT_SECONDS in stealth_poster)
-    timeout_s = int(os.getenv("POST_TIMEOUT_SECONDS", "1200"))
+    # Stay below ~15m platform HTTP limits (e.g. Railway) so we return JSON 504 instead of a dropped socket.
+    # Raise POST_TIMEOUT_SECONDS locally if headed login needs longer.
+    timeout_s = int(os.getenv("POST_TIMEOUT_SECONDS", "840"))
     try:
         fut = _post_executor.submit(
             poster.post,
@@ -322,7 +376,8 @@ def post_now(post_id):
             {
                 "error": (
                     f"Posting ran longer than {timeout_s}s and was stopped. "
-                    "Check the Chromium window — you may need to log in to Facebook, then try again."
+                    "On the server, refresh your Playwright session under Accounts, confirm the Page URL, "
+                    "or raise POST_TIMEOUT_SECONDS if you use a headed browser locally."
                 )
             }
         ), 504

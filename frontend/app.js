@@ -17,6 +17,8 @@ let editingPostId = null;
 let accounts = [];
 /** From GET /api/dashboard: true on Railway/cloud (no browser window on your PC). */
 let postingHeadless = true;
+/** Account id for the Playwright session paste modal. */
+let sessionModalAccountId = null;
 
 document.addEventListener('DOMContentLoaded', () => {
   initConstructionOverlay();
@@ -43,6 +45,13 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('saveEdit').addEventListener('click', savePostEdit);
   document.getElementById('editModal').addEventListener('click', e => {
     if (e.target === e.currentTarget) closeEditModal();
+  });
+
+  document.getElementById('closeSessionModal')?.addEventListener('click', closeSessionModal);
+  document.getElementById('cancelSessionModal')?.addEventListener('click', closeSessionModal);
+  document.getElementById('saveSessionModal')?.addEventListener('click', savePlaywrightSessionFromModal);
+  document.getElementById('sessionModal')?.addEventListener('click', e => {
+    if (e.target === e.currentTarget) closeSessionModal();
   });
 
   document.getElementById('queueGrid').addEventListener('click', onQueueCardClick);
@@ -290,6 +299,12 @@ function postNowConfirmText() {
 
 async function postNow(postId, btn) {
   if (!confirm(postNowConfirmText())) return;
+
+  const resetBtn = () => {
+    btn.disabled = false;
+    btn.textContent = 'Post now';
+  };
+
   btn.disabled = true;
   btn.textContent = 'Posting...';
   if (postingHeadless) {
@@ -304,13 +319,14 @@ async function postNow(postId, btn) {
     await apiFetch(`/queue/${postId}`, { method: 'GET' });
   } catch (e) {
     showToast('This draft is not on the server anymore. Refreshing the queue…', 'error');
-    btn.disabled = false;
-    btn.textContent = 'Post now';
+    resetBtn();
     loadDashboard();
     return;
   }
+
+  const postTimeoutMs = postingHeadless ? 900_000 : 1_300_000;
   try {
-    const posted = await apiFetch(`/post/${postId}`, { method: 'POST', timeoutMs: 1_300_000 });
+    const posted = await apiFetch(`/post/${postId}`, { method: 'POST', timeoutMs: postTimeoutMs });
     const ph = posted.posting_headless !== false;
     showToast(
       ph
@@ -321,8 +337,8 @@ async function postNow(postId, btn) {
     setTimeout(loadDashboard, 800);
   } catch (e) {
     showToast('Posting failed: ' + (e.message || 'Unknown error'), 'error');
-    btn.disabled = false;
-    btn.textContent = 'Post now';
+  } finally {
+    resetBtn();
   }
 }
 
@@ -394,6 +410,7 @@ async function loadAccounts() {
   try {
     const data = await apiFetch('/accounts');
     accounts = data.accounts || [];
+    if (typeof data.posting_headless === 'boolean') postingHeadless = data.posting_headless;
     renderAccounts(accounts);
     document.getElementById('statAccounts').textContent = accounts.length;
   } catch (e) {
@@ -424,6 +441,7 @@ function renderAccounts(accs) {
         </p>
         <div class="account-meta-row">
           <span class="status-pill ${acc.crawl_ready ? 'status-pill--ok' : 'status-pill--warn'}">${escHtml(acc.status_label || '')}</span>
+          ${postingHeadless ? `<span class="status-pill ${acc.has_playwright_session ? 'status-pill--ok' : 'status-pill--warn'}">${acc.has_playwright_session ? 'Server session saved' : 'Cloud: add session JSON'}</span>` : ''}
           ${acc.crawl_pages != null ? `<span class="meta-text">${acc.crawl_pages} page(s) indexed</span>` : ''}
           ${acc.updated_at ? `<span class="meta-text">Updated ${escHtml(formatDateTime(acc.updated_at))}</span>` : ''}
         </div>
@@ -431,6 +449,8 @@ function renderAccounts(accs) {
         <p class="next-step-hint">${escHtml(acc.next_step_hint || '')}</p>
       </div>
       <div class="account-actions">
+        <button type="button" class="btn btn-secondary" onclick="openPlaywrightSessionModal(${acc.id})" title="Paste Playwright storage JSON for headless posting">Session JSON…</button>
+        <button type="button" class="btn btn-secondary" onclick="clearPlaywrightSession(${acc.id})">Clear session</button>
         <button type="button" class="btn btn-secondary" onclick="recrawl(${acc.id})">Re-crawl</button>
         <button type="button" class="btn btn-danger" onclick="deleteAccount(${acc.id})">Remove</button>
       </div>
@@ -491,6 +511,66 @@ async function recrawl(accountId) {
     loadDashboard();
   } catch (e) {
     showToast('Crawl failed', 'error');
+  }
+}
+
+function openPlaywrightSessionModal(accountId) {
+  sessionModalAccountId = accountId;
+  const ta = document.getElementById('sessionJsonInput');
+  if (ta) ta.value = '';
+  const el = document.getElementById('sessionModal');
+  if (el) {
+    el.classList.remove('hidden');
+    ta?.focus();
+  }
+}
+
+function closeSessionModal() {
+  sessionModalAccountId = null;
+  document.getElementById('sessionModal')?.classList.add('hidden');
+}
+
+async function savePlaywrightSessionFromModal() {
+  const id = sessionModalAccountId;
+  const raw = document.getElementById('sessionJsonInput')?.value?.trim() || '';
+  if (!id) {
+    showToast('No account selected.', 'error');
+    return;
+  }
+  if (!raw) {
+    showToast('Paste the JSON first.', 'error');
+    return;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    showToast('Invalid JSON — check the file contents.', 'error');
+    return;
+  }
+  try {
+    await apiFetch(`/accounts/${id}/playwright-storage`, {
+      method: 'POST',
+      body: JSON.stringify(parsed),
+    });
+    showToast('Session saved. You can try Post now.', 'success');
+    closeSessionModal();
+    await loadAccounts();
+    loadDashboard();
+  } catch (e) {
+    showToast(e.message || 'Save failed', 'error');
+  }
+}
+
+async function clearPlaywrightSession(accountId) {
+  if (!confirm('Remove the saved browser session for this account? Posting on the server will need a new JSON.')) return;
+  try {
+    await apiFetch(`/accounts/${accountId}/playwright-storage`, { method: 'DELETE' });
+    showToast('Session cleared', 'info');
+    await loadAccounts();
+    loadDashboard();
+  } catch (e) {
+    showToast(e.message || 'Clear failed', 'error');
   }
 }
 
@@ -559,7 +639,10 @@ async function apiFetch(path, options = {}) {
     const name = err && err.name;
     const msg = (err && err.message) || String(err);
     if (name === 'AbortError') {
-      throw new Error('Request timed out. Posting can take several minutes — try again and wait, or check the server terminal for errors.');
+      const hint = postingHeadless
+        ? 'Timed out waiting for the server (~15 min). Refresh the Daily Queue, check Facebook for the post, then try again if needed.'
+        : 'Request timed out. Posting can take several minutes — try again or check the server terminal.';
+      throw new Error(hint);
     }
     if (/failed to fetch|networkerror|load failed/i.test(msg)) {
       throw new Error(

@@ -297,16 +297,7 @@ body {
     line-height: 1.6;
     color: var(--text);
     white-space: pre-wrap;
-    max-height: 120px;
-    overflow: hidden;
-    position: relative;
-}
-.post-caption::after {
-    content: '';
-    position: absolute;
-    bottom: 0; left: 0; right: 0;
-    height: 30px;
-    background: linear-gradient(transparent, var(--bg2));
+    word-break: break-word;
 }
 
 .post-card-footer {
@@ -389,6 +380,18 @@ body {
     justify-content: center;
 }
 .modal-overlay.hidden { display: none; }
+.modal-wide {
+  max-width: min(640px,96vw);
+}
+
+.session-json-input {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  resize: vertical;
+}
+
 .modal {
     background: var(--bg2);
     border: 1px solid var(--border);

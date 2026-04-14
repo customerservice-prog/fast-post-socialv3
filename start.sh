@@ -12,7 +12,7 @@ export DEBIAN_FRONTEND=noninteractive
 python -m playwright install --with-deps chromium
 export PYTHONUNBUFFERED=1
 PORT="${PORT:-5000}"
-TIMEOUT="${GUNICORN_TIMEOUT:-${POST_TIMEOUT_SECONDS:-1200}}"
+TIMEOUT="${GUNICORN_TIMEOUT:-${POST_TIMEOUT_SECONDS:-840}}"
 exec gunicorn -w 1 -k gthread --threads 4 \
   -b "0.0.0.0:${PORT}" \
   --timeout "$TIMEOUT" \

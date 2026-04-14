@@ -23,9 +23,11 @@ Pinned configuration in this repo (commit and redeploy from **`main`**):
 | `FB_HEADED` | `0` or unset |
 | `DATABASE_PATH` | `/data/fastpost.db` (with volume) |
 | `PROFILES_DIR` | `/data/browser_profiles` (with volume) |
+| `POST_TIMEOUT_SECONDS` | optional; default **840** (under ~15m HTTP limits on Railway). Increase only on hosts that allow longer requests. |
 
 3. **Volume:** mount at **`/data`** and set **`DATABASE_PATH=/data/fastpost.db`**. Without this, SQLite lives on ephemeral disk and **accounts disappear on every redeploy** (the app will log the DB path at startup).
 4. **Posting:** runs **headless** on the server — no browser window on your PC (see Settings in the app).
+5. **Facebook session:** the server cannot complete Meta login interactively. Run `python scripts/export_facebook_storage.py` **on your PC** (headed browser), log in to Facebook, then in the app go to **Accounts → Session JSON** and paste the saved file contents. That writes `uploaded_storage.json` under `PROFILES_DIR/profile_<id>/` (keep **`PROFILES_DIR` on the same `/data` volume** so sessions survive redeploys).
 
 ## Smoke checks (after deploy)
 

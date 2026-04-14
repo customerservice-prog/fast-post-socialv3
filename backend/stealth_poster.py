@@ -32,6 +32,9 @@ _stealth = Stealth()
 PROFILES_DIR = Path(os.getenv("PROFILES_DIR", "./browser_profiles"))
 PROFILES_DIR.mkdir(parents=True, exist_ok=True)
 
+# Saved via POST /api/accounts/<id>/playwright-storage — required for headless cloud posting (no login UI).
+UPLOADED_STORAGE_NAME = "uploaded_storage.json"
+
 
 def _running_in_paas() -> bool:
     """Render, GitHub Actions, Fly, Railway, K8s, etc. — never use a local X server here."""
@@ -122,12 +125,24 @@ class StealthPoster:
         """Core async posting logic"""
         profile_path = (PROFILES_DIR / f"profile_{account_id}").resolve()
         profile_path.mkdir(parents=True, exist_ok=True)
+        upload_path = profile_path / UPLOADED_STORAGE_NAME
         state_file = profile_path / "state.json"
 
+        if _running_in_paas() and not upload_path.is_file():
+            return {
+                "success": False,
+                "error": (
+                    "This host runs headless and cannot open a login window. "
+                    "Under Accounts, paste Playwright storage JSON for this account "
+                    "(run scripts/export_facebook_storage.py on your PC after logging in to Facebook), "
+                    "and mount PROFILES_DIR on a persistent volume. See DEPLOY.md."
+                ),
+            }
+
         result: Dict = {"success": False, "error": "Interrupted"}
-        leave_browser_open = False
         playwright = await async_playwright().start()
         context = None
+        ephemeral_browser = None
         try:
             launch_args = [
                 "--disable-blink-features=AutomationControlled",
@@ -139,23 +154,47 @@ class StealthPoster:
                 launch_args.append("--headless=new")
                 if sys.platform != "win32":
                     launch_args.append("--ozone-platform=headless")
-            context = await playwright.chromium.launch_persistent_context(
-                user_data_dir=str(profile_path),
-                headless=self.headless,
-                viewport={
-                    "width": random.randint(1280, 1440),
-                    "height": random.randint(800, 900),
-                },
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/131.0.0.0 Safari/537.36"
-                ),
-                args=launch_args,
-                locale="en-US",
-                timezone_id=os.getenv("FB_TZ", "America/New_York"),
-                env=_browser_subprocess_env(self.headless),
+
+            viewport = {
+                "width": random.randint(1280, 1440),
+                "height": random.randint(800, 900),
+            }
+            user_agent = (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/131.0.0.0 Safari/537.36"
             )
+            tz = os.getenv("FB_TZ", "America/New_York")
+            env = _browser_subprocess_env(self.headless)
+
+            if upload_path.is_file():
+                logger.info(
+                    "[StealthPoster] Using uploaded Playwright storage_state for %s",
+                    profile_path.name,
+                )
+                ephemeral_browser = await playwright.chromium.launch(
+                    headless=self.headless,
+                    args=launch_args,
+                    env=env,
+                )
+                context = await ephemeral_browser.new_context(
+                    storage_state=str(upload_path),
+                    viewport=viewport,
+                    user_agent=user_agent,
+                    locale="en-US",
+                    timezone_id=tz,
+                )
+            else:
+                context = await playwright.chromium.launch_persistent_context(
+                    user_data_dir=str(profile_path),
+                    headless=self.headless,
+                    viewport=viewport,
+                    user_agent=user_agent,
+                    args=launch_args,
+                    locale="en-US",
+                    timezone_id=tz,
+                    env=env,
+                )
 
             page = context.pages[0] if context.pages else await context.new_page()
             await _stealth.apply_stealth_async(page)
@@ -169,6 +208,8 @@ class StealthPoster:
 
             try:
                 await context.storage_state(path=str(state_file))
+                if upload_path.is_file():
+                    await context.storage_state(path=str(upload_path))
             except Exception as ex:
                 logger.warning("[StealthPoster] storage_state backup skipped: %s", ex)
         except Exception as e:
@@ -185,6 +226,8 @@ class StealthPoster:
                 )
             elif context is not None:
                 await context.close()
+            if ephemeral_browser is not None and not leave_browser_open:
+                await ephemeral_browser.close()
             if not leave_browser_open:
                 await playwright.stop()
 
@@ -223,25 +266,36 @@ class StealthPoster:
 
         if not composer:
             if await self._facebook_needs_login(page):
-                err = {
-                    "success": False,
-                    "error": (
+                if self.headless:
+                    msg = (
+                        "Facebook still shows login or a security checkpoint. "
+                        "Your uploaded session is missing, expired, or blocked. "
+                        "Log in locally, re-run scripts/export_facebook_storage.py, "
+                        "then paste the new JSON under Accounts."
+                    )
+                else:
+                    msg = (
                         "Facebook still shows login or a security step. Finish in the Chromium window; "
                         "it will stay open so you are not rushed. Then click Post again."
-                    ),
-                }
-                if self._env_leave_browser_open():
+                    )
+                err = {"success": False, "error": msg}
+                if self._env_leave_browser_open() and not self.headless:
                     err["leave_browser_open"] = True
                 return err
-            err = {
-                "success": False,
-                "error": (
+            if self.headless:
+                cmsg = (
+                    "Could not find the post composer. Check your Page URL "
+                    "(use facebook.com/YourPageName, not a /people/… link). "
+                    "If you are logged in locally, re-export Playwright storage and paste it under Accounts."
+                )
+            else:
+                cmsg = (
                     "Could not find the post composer. Log in to Facebook in the browser window first. "
                     "If your saved URL is a /people/... profile link, use your Page username URL from "
                     "Meta (e.g. facebook.com/YourPageName) for posting after you're logged in."
-                ),
-            }
-            if self._env_leave_browser_open():
+                )
+            err = {"success": False, "error": cmsg}
+            if self._env_leave_browser_open() and not self.headless:
                 err["leave_browser_open"] = True
             return err
 
@@ -283,11 +337,18 @@ class StealthPoster:
             if needs:
                 stable = 0
                 if not logged_waiting:
-                    logger.info(
-                        "[StealthPoster] Login or checkpoint detected — sign in in Chromium; "
-                        "waiting up to %.0fs (page is not closed while you log in).",
-                        max_wait,
-                    )
+                    if self.headless:
+                        logger.info(
+                            "[StealthPoster] Login or checkpoint detected in headless mode — "
+                            "waiting up to %.0fs (invalid session; prefer uploading fresh storage).",
+                            max_wait,
+                        )
+                    else:
+                        logger.info(
+                            "[StealthPoster] Login or checkpoint detected — sign in in Chromium; "
+                            "waiting up to %.0fs (page is not closed while you log in).",
+                            max_wait,
+                        )
                     logged_waiting = True
                 await asyncio.sleep(poll_s)
                 continue
@@ -317,14 +378,18 @@ class StealthPoster:
                 logger.info("[StealthPoster] Session looks ready — continuing.")
             return None
 
-        err: Dict = {
-            "success": False,
-            "error": (
+        if self.headless:
+            msg = (
+                f"Facebook login or checkpoint did not clear within {int(max_wait)} seconds. "
+                "Re-export Playwright storage after logging in locally and paste it under Accounts."
+            )
+        else:
+            msg = (
                 f"Facebook login did not finish within {int(max_wait)} seconds. "
                 "The browser will stay open so you can keep going; when finished, click Post again."
-            ),
-        }
-        if self._env_leave_browser_open():
+            )
+        err: Dict = {"success": False, "error": msg}
+        if self._env_leave_browser_open() and not self.headless:
             err["leave_browser_open"] = True
         return err
 
