@@ -15,8 +15,7 @@ from typing import List, Dict, Optional, Tuple
 class AIContentGenerator:
     """Generates captions from structured crawl data using templates and light text shaping."""
 
-    def __init__(self, api_key: Optional[str] = None):
-        # api_key accepted for backward compatibility; ignored (no cloud APIs).
+    def __init__(self) -> None:
         self.schedule = {
             "morning": "09:00",
             "afternoon": "13:00",

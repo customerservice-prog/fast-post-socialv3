@@ -1,6 +1,6 @@
 # FastPost Social v3 — AI Social Media Marketing Bot
 
-An intelligent, no-third-party-AI social media automation platform. Scrapes your business website, generates captions locally from that content, and posts to Facebook/Instagram with stealth human-like behavior.
+An intelligent, **no–API-key** social media stack: no OpenAI, no cloud LLM billing, no vendor tokens. It scrapes your business website, generates captions **locally** from that content, and posts to Facebook/Instagram with stealth human-like behavior (your normal browser login — no platform API keys in this app).
 
 ## Project Structure
 - backend/app.py — Flask REST API server
@@ -39,10 +39,14 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
-Optional `.env` in `/backend` (for production, set a strong `SECRET_KEY`):
+Optional `.env` in `/backend` — **not** API keys; only tuning and Flask:
+
 ```
-SECRET_KEY=your_secret
+# Optional — Flask session cookie signing (a default is built into the app if unset)
+# SECRET_KEY=long-random-string
 ```
+
+There are **no required environment variables** for captions, crawling, or scheduling. Facebook/Instagram posting uses Playwright like a logged-in user, not the Graph API, so **no Meta app tokens** are configured in this repo.
 
 Run: `python app.py` from `/backend`, then open **http://localhost:5000** (the server serves the dashboard).
 

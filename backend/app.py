@@ -22,6 +22,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+# No third-party API keys required; optional SECRET_KEY only for Flask session signing.
 app.secret_key = os.getenv("SECRET_KEY", "fastpost-secret-key-change-in-production")
 CORS(app, supports_credentials=True)
 
