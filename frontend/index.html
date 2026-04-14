@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+  <html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FastPost Social v3 — AI Marketing Bot</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+
+  <!-- ===== SIDEBAR ===== -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <span class="logo-icon">⚡</span>
+      <span class="logo-text">FastPost v3</span>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="#" class="nav-item active" data-page="queue">
+        <span class="nav-icon">📋</span> Daily Queue
+    </a>
+      <a href="#" class="nav-item" data-page="accounts">
+        <span class="nav-icon">🔗</span> Accounts
+      </a>
+      <a href="#" class="nav-item" data-page="analytics">
+        <span class="nav-icon">📊</span> Analytics
+      </a>
+      <a href="#" class="nav-item" data-page="settings">
+      <span class="nav-icon">⚙️</span> Settings
+      </a>
+    </nav>
+    <div class="sidebar-status">
+      <div class="status-dot" id="schedulerDot"></div>
+      <span id="schedulerStatus">Loading...</span>
+    </div>
+  </aside>
+
+  <!-- ===== MAIN CONTENT ===== -->
+  <main class="main">
+
+    <!-- ── HEADER ── -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <h1 id="pageTitle">Daily Queue</h1>
+        <span id="todayDate" class="date-badge"></span>
+      </div>
+    <div class="topbar-right">
+        <button class="btn btn-secondary" id="btnGeneratePosts">
+          ✨ Generate Today's Posts
+        </button>
+        <button class="btn btn-primary" id="btnRefresh">
+          🔄 Refresh
+        </button>
+      </div>
+  </header>
+
+    <!-- ── TOAST NOTIFICATION ── -->
+    <div id="toast" class="toast hidden"></div>
+
+    <!-- ========== PAGE: QUEUE ========== -->
+    <section id="pagQueue" class="page active">
+      <div class="stats-row" id="statsRow">
+      <div class="stat-card">
+          <div class="stat-number" id="statPending">—</div>
+          <div class="stat-label">Pending</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-number" id="statPublished">—</div>
+          <div class="stat-label">Published Today</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-number" id="statAccounts">—</div>
+          <div class="stat-label">Linked Accounts</div>
+        </div>
+      </div>
+
+      <div class="queue-grid" id="queueGrid">
+        <div class="empty-state">
+          <div class="empty-icon">📭</div>
+          <p>No posts in today's queue.</p>
+          <p>Click <strong>Generate Today's Posts</strong> to get started!</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== PAGE: ACCOUNTS ========== -->
+    <section id="pagAccounts" class="page">
+      <div class="card">
+        <h2>Link a New Account</h2>
+        <form id="addAccountForm" class="account-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Business Name</label>
+              <input type="text" id="bizName" placeholder="e.g. Party Paradise Rentals" required />
+            </div>
+            <div class="form-group">
+              <label>Platform</label>
+              <select id="platform">
+                <option value="facebook">Facebook</option>
+                <option value="instagram">Instagram</option>
+                <option value="both">Both</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Business Website URL</label>
+            <input type="url" id="bizUrl" placeholder="https://yoursite.com" required />
+            </div>
+            <div class="form-group">
+              <label>Facebook/Instagram Page URL</label>
+              <input type="url" id="pageUrl" placeholder="https://facebook.com/yourpage" required />
+            </div>
+          </div>
+          <button type="submit" class="btn btn-primary">+ Link Account & Crawl Website</button>
+        </form>
+      </div>
+
+      <div id="accountsList" class="accounts-list">
+        <div class="empty-state">
+          <div class="empty-icon">🔗</div>
+          <p>No accounts linked yet.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== PAGE: ANALYTICS ========== -->
+    <section id="pagAnalytics" class="page">
+      <div class="stats-row">
+        <div class="stat-card highlight">
+          <div class="stat-number" id="totalPublished">—</div>
+          <div class="stat-label">Total Posts Published</div>
+      </div>
+        <div class="stat-card highlight">
+        <div class="stat-number" id="totalLikes">—</div>
+        <div class="stat-label">Total Likes</div>
+      </div>
+        <div class="stat-card highlight">
+          <div class="stat-number" id="totalShares">—</div>
+          <div class="stat-label">Total Shares</div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Post History</h2>
+        <div id="postHistory" class="post-history">Loading...</div>
+      </div>
+    </section>
+
+    <!-- ========== PAGE: SETTINGS ========== -->
+    <section id="pagSettings" class="page">
+      <div class="card">
+        <h2>Scheduler Settings</h2>
+        <div class="settings-row">
+          <div>
+            <p>Auto-generates posts daily at 7:00 AM for all linked accounts.</p>
+            <p>Posts remain <strong>pending</strong> until you manually approve them.</p>
+            <p id="nextRunTime" class="muted">Next run: loading...</p>
+          </div>
+          <div class="settings-btns">
+            <button class="btn btn-primary" id="btnStartScheduler">▶ Start Scheduler</button>
+            <button class="btn btn-danger" id="btnStopScheduler">⏹ Stop Scheduler</button>
+            <button class="btn btn-secondary" id="btnTriggerNow">⚡ Generate Now</button>
+        </div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>About</h2>
+        <p>FastPost Social v3 — AI-powered social media automation.</p>
+        <p>Backend: Flask + SQLite | AI: GPT-4o | Automation: Playwright Stealth</p>
+      <p class="muted">Posts to Facebook/Instagram using human-like browser automation.</p>
+    </div>
+  </section>
+
+  </main>
+
+<!-- ===== EDIT MODAL ===== -->
+  <div id="editModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Edit Post</h3>
+        <button class="modal-close" id="closeModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Caption</label>
+          <textarea id="editCaption" rows="6" placeholder="Edit your post caption..."></textarea>
+        </div>
+        <div id="editImagePrompt" class="image-prompt-preview"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelEdit">Cancel</button>
+        <button class="btn btn-primary" id="saveEdit">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+  </body>
+  </html>
