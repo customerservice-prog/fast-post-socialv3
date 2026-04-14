@@ -245,7 +245,8 @@ def post_now(post_id):
     if not account:
         return jsonify({"error": "Account not found"}), 404
 
-    timeout_s = int(os.getenv("POST_TIMEOUT_SECONDS", "600"))
+    # Allow long Facebook login + composer (see FB_LOGIN_WAIT_SECONDS in stealth_poster)
+    timeout_s = int(os.getenv("POST_TIMEOUT_SECONDS", "1200"))
     try:
         fut = _post_executor.submit(
             poster.post,
@@ -332,8 +333,9 @@ if __name__ == "__main__":
     # threaded=True: Playwright can run for minutes; without threads the dev server blocks all other requests.
     # use_reloader: set FLASK_RELOADER=1 to enable watchdog (reload can interrupt a long post mid-flight).
     use_reloader = os.environ.get("FLASK_RELOADER", "").lower() in ("1", "true", "yes")
+    _debug = os.environ.get("FLASK_DEBUG", "0").lower() in ("1", "true", "yes")
     app.run(
-        debug=True,
+        debug=_debug,
         host="0.0.0.0",
         port=int(os.environ.get("PORT", "5000")),
         threaded=True,

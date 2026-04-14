@@ -49,6 +49,11 @@ class StealthPoster:
         self.db = db
         self.headless = headless
 
+    @staticmethod
+    def _env_leave_browser_open() -> bool:
+        """If True, do not close Chromium when login fails so the user can finish signing in."""
+        return os.getenv("FB_LEAVE_BROWSER_OPEN", "1").lower() in ("1", "true", "yes")
+
     def post(self, platform: str, page_url: str, caption: str, account_id: int) -> Dict:
         """
         Synchronous wrapper. Runs the async post in an event loop.
@@ -69,8 +74,12 @@ class StealthPoster:
         profile_path.mkdir(parents=True, exist_ok=True)
         state_file = profile_path / "state.json"
 
-        async with async_playwright() as p:
-            context = await p.chromium.launch_persistent_context(
+        result: Dict = {"success": False, "error": "Interrupted"}
+        leave_browser_open = False
+        playwright = await async_playwright().start()
+        context = None
+        try:
+            context = await playwright.chromium.launch_persistent_context(
                 user_data_dir=str(profile_path),
                 headless=self.headless,
                 viewport={
@@ -94,25 +103,37 @@ class StealthPoster:
             page = context.pages[0] if context.pages else await context.new_page()
             await _stealth.apply_stealth_async(page)
 
+            if platform.lower() in ["facebook", "fb", "both"]:
+                result = await self._post_facebook(page, page_url, caption)
+            elif platform.lower() in ["instagram", "ig"]:
+                result = await self._post_instagram(page, page_url, caption)
+            else:
+                result = {"success": False, "error": f"Unsupported platform: {platform}"}
+
             try:
-                if platform.lower() in ["facebook", "fb", "both"]:
-                    result = await self._post_facebook(page, page_url, caption)
-                elif platform.lower() in ["instagram", "ig"]:
-                    result = await self._post_instagram(page, page_url, caption)
-                else:
-                    result = {"success": False, "error": f"Unsupported platform: {platform}"}
-
-                try:
-                    await context.storage_state(path=str(state_file))
-                except Exception as ex:
-                    logger.warning(f"[StealthPoster] storage_state backup skipped: {ex}")
-                return result
-
-            except Exception as e:
-                logger.error(f"[StealthPoster] Posting error: {e}")
-                return {"success": False, "error": str(e)}
-            finally:
+                await context.storage_state(path=str(state_file))
+            except Exception as ex:
+                logger.warning("[StealthPoster] storage_state backup skipped: %s", ex)
+        except Exception as e:
+            logger.error("[StealthPoster] Posting error: %s", e)
+            result = {"success": False, "error": str(e)}
+        finally:
+            leave_browser_open = bool(
+                isinstance(result, dict) and result.get("leave_browser_open")
+            )
+            if leave_browser_open:
+                logger.info(
+                    "[StealthPoster] Leaving Chromium open so you can finish logging in. "
+                    "When done, close the window or run Post again."
+                )
+            elif context is not None:
                 await context.close()
+            if not leave_browser_open:
+                await playwright.stop()
+
+        out = dict(result) if isinstance(result, dict) else {"success": False, "error": str(result)}
+        out.pop("leave_browser_open", None)
+        return out
 
     async def _post_facebook(self, page: Page, page_url: str, caption: str) -> Dict:
         """Post to a Facebook Page or profile (desktop web)."""
@@ -132,22 +153,40 @@ class StealthPoster:
 
         composer = await self._resolve_facebook_composer(page)
         if not composer:
+            if await self._facebook_needs_login(page) or not await self._facebook_feed_looks_loaded(page):
+                logger.info(
+                    "[StealthPoster] No composer yet — waiting again for login / page to finish loading."
+                )
+                topup = float(os.getenv("FB_LOGIN_TOPUP_SECONDS", "480"))
+                again = await self._wait_for_facebook_session(page, target, max_wait_s=topup)
+                if again is not None:
+                    return again
+                await self._human_scroll(page)
+                composer = await self._resolve_facebook_composer(page)
+
+        if not composer:
             if await self._facebook_needs_login(page):
-                return {
+                err = {
                     "success": False,
                     "error": (
-                        "Facebook is still showing a login or security screen. Finish signing in in the "
-                        "browser window, wait until you see your Page or feed, then click Post again."
+                        "Facebook still shows login or a security step. Finish in the Chromium window; "
+                        "it will stay open so you are not rushed. Then click Post again."
                     ),
                 }
-            return {
+                if self._env_leave_browser_open():
+                    err["leave_browser_open"] = True
+                return err
+            err = {
                 "success": False,
                 "error": (
-                    "Could not find the post composer. Use your Page's Facebook URL "
-                    "(https://www.facebook.com/YourPageName), and make sure you're posting as a user "
-                    "who can manage that Page."
+                    "Could not find the post composer. Log in to Facebook in the browser window first. "
+                    "If your saved URL is a /people/... profile link, use your Page username URL from "
+                    "Meta (e.g. facebook.com/YourPageName) for posting after you're logged in."
                 ),
             }
+            if self._env_leave_browser_open():
+                err["leave_browser_open"] = True
+            return err
 
         await self._human_move_and_click(page, composer)
         await self._human_delay(0.4, 0.9)
@@ -163,54 +202,88 @@ class StealthPoster:
 
         return {"success": False, "error": "Could not find or click the Post button (check for dialogs or blocking)."}
 
-    async def _wait_for_facebook_session(self, page: Page, target_url: str) -> Optional[Dict]:
+    async def _wait_for_facebook_session(
+        self, page: Page, target_url: str, *, max_wait_s: Optional[float] = None
+    ) -> Optional[Dict]:
         """
-        If Meta shows login/checkpoint, wait until the user completes it (same browser window).
-        Then navigate to the Page URL again. Returns an error dict only on timeout.
+        Wait for Meta login/checkpoint to finish. Facebook often paints the login form late, so we require
+        a minimum settle time and several consecutive "not login" checks before continuing.
         """
-        max_wait_s = float(os.getenv("FB_LOGIN_WAIT_SECONDS", "600"))
+        max_wait = float(max_wait_s) if max_wait_s is not None else float(
+            os.getenv("FB_LOGIN_WAIT_SECONDS", "900")
+        )
+        min_settle = float(os.getenv("FB_PAGE_SETTLE_SECONDS", "15"))
+        stable_need = int(os.getenv("FB_LOGIN_STABLE_POLLS", "4"))
         poll_s = 2.5
         start = time.monotonic()
         logged_waiting = False
+        stable = 0
 
-        while time.monotonic() - start < max_wait_s:
-            if await self._facebook_needs_login(page):
+        while time.monotonic() - start < max_wait:
+            elapsed = time.monotonic() - start
+            needs = await self._facebook_needs_login(page)
+
+            if needs:
+                stable = 0
                 if not logged_waiting:
                     logger.info(
-                        "[StealthPoster] Login or checkpoint detected — sign in in the Chromium window; "
-                        "waiting up to %.0fs before looking for the composer.",
-                        max_wait_s,
+                        "[StealthPoster] Login or checkpoint detected — sign in in Chromium; "
+                        "waiting up to %.0fs (page is not closed while you log in).",
+                        max_wait,
                     )
                     logged_waiting = True
                 await asyncio.sleep(poll_s)
                 continue
 
-            # Session looks usable — open the target Page (user may have landed on home after login)
+            # Not login — but FB often shows a blank shell first; do not navigate away too early.
+            if elapsed < min_settle:
+                await asyncio.sleep(poll_s)
+                continue
+
+            stable += 1
+            if stable < stable_need:
+                await asyncio.sleep(poll_s)
+                continue
+
             try:
                 await page.goto(target_url, wait_until="domcontentloaded", timeout=90000)
-                await asyncio.sleep(2)
+                await asyncio.sleep(2.5)
             except Exception as e:
-                logger.warning("[StealthPoster] Navigation after login: %s", e)
+                logger.warning("[StealthPoster] Navigation after session: %s", e)
 
-            # Re-check in case a second redirect sent us back to login
             if await self._facebook_needs_login(page):
+                stable = 0
                 await asyncio.sleep(poll_s)
                 continue
 
             if logged_waiting:
-                logger.info("[StealthPoster] Session ready — continuing to composer.")
+                logger.info("[StealthPoster] Session looks ready — continuing.")
             return None
 
-        return {
+        err: Dict = {
             "success": False,
             "error": (
-                f"Facebook login did not finish within {int(max_wait_s)} seconds. "
-                "Complete email/password and any security checks in the Chromium window, then click Post again."
+                f"Facebook login did not finish within {int(max_wait)} seconds. "
+                "The browser will stay open so you can keep going; when finished, click Post again."
             ),
         }
+        if self._env_leave_browser_open():
+            err["leave_browser_open"] = True
+        return err
+
+    async def _facebook_feed_looks_loaded(self, page: Page) -> bool:
+        """Heuristic: enough DOM to try composer (avoids exiting wait while still a white screen)."""
+        try:
+            html = await page.content()
+            if len(html) < 8000:
+                return False
+            # Login walls are usually smaller or have password inputs (handled elsewhere)
+            return True
+        except Exception:
+            return False
 
     async def _facebook_needs_login(self, page: Page) -> bool:
-        """True if we're on a login / checkpoint / recovery flow (not ready to use composer)."""
+        """True if Meta is asking us to log in / verify — including modal login on /people/ URLs."""
         try:
             u = page.url.lower()
             parsed = urlparse(page.url)
@@ -238,6 +311,61 @@ class StealthPoster:
             if "facebook.com/login" in u or "/login.php" in u:
                 return True
 
+            # ── Modal / overlay login (e.g. "See more from …" on public /people/… profiles) ──
+            try:
+                dialog_login = page.locator(
+                    '[role="dialog"] input[type="password"], '
+                    '[aria-modal="true"] input[type="password"]'
+                )
+                dc = await dialog_login.count()
+                if dc > 0:
+                    for i in range(min(dc, 4)):
+                        try:
+                            if await dialog_login.nth(i).is_visible():
+                                return True
+                        except Exception:
+                            continue
+            except Exception:
+                pass
+
+            try:
+                if await page.get_by_text(re.compile(r"see more from", re.I)).count() > 0:
+                    if await page.locator('input[type="password"]').count() > 0:
+                        return True
+            except Exception:
+                pass
+
+            # Logged-out chrome: "Email or phone" placeholder + password (top bar or modal)
+            try:
+                ph_email = page.locator(
+                    '[placeholder*="Email or phone"], [placeholder*="mail"], '
+                    '[aria-label*="Email or phone"], [aria-label*="phone"]'
+                )
+                pwd_all = page.locator('input[type="password"]')
+                pc = await pwd_all.count()
+                if await ph_email.count() > 0 and pc > 0:
+                    for i in range(min(pc, 6)):
+                        try:
+                            if await pwd_all.nth(i).is_visible():
+                                return True
+                        except Exception:
+                            continue
+            except Exception:
+                pass
+
+            # Public profile path: no composer until logged in; visible password means gate
+            if "/people/" in path and "facebook.com" in host:
+                try:
+                    pwds = page.locator('input[type="password"]')
+                    for i in range(min(await pwds.count(), 8)):
+                        try:
+                            if await pwds.nth(i).is_visible():
+                                return True
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+
             # Main login form: email + password visible (many Meta layouts)
             try:
                 pwd = page.locator('input[type="password"]').first
@@ -260,7 +388,6 @@ class StealthPoster:
                 pass
 
         except Exception:
-            # Don't treat detection errors as "must log in" (would block forever)
             return False
 
         return False

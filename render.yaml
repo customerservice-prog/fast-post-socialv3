@@ -1,0 +1,7 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: fast-post-socialv3
+    runtime: python
+    buildCommand: pip install -r requirements.txt && cd backend && python -m playwright install chromium
+    startCommand: sh start.sh

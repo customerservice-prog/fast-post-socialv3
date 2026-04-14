@@ -46,5 +46,15 @@ SECRET_KEY=your_secret
 
 Run: `python app.py` from `/backend`, then open **http://localhost:5000** (the server serves the dashboard).
 
+## Deploy (Render / Railpack)
+
+The repo root includes **`requirements.txt`** (includes `backend/requirements.txt`), **`start.sh`**, and **`render.yaml`** so hosts can detect Python and how to start the app.
+
+- **Build command** (if not using `render.yaml`):  
+  `pip install -r requirements.txt && cd backend && python -m playwright install chromium`
+- **Start command**: `sh start.sh` (runs `backend/app.py`; honors **`PORT`** and **`FLASK_DEBUG=0`** on the server).
+
+**Playwright/Chromium** on cloud hosts may need extra OS libraries; if the build fails on browser install, use a Dockerfile or your platform’s Playwright docs. Stealth posting is optional for health checks — the API and dashboard still run.
+
 ## License
 MIT

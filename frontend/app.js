@@ -217,7 +217,7 @@ async function postNow(postId, btn) {
   btn.textContent = 'Posting...';
   showToast('Posting… If a Chromium window opened, complete any login there. This can take a few minutes.', 'info');
   try {
-    await apiFetch(`/post/${postId}`, { method: 'POST', timeoutMs: 660000 });
+    await apiFetch(`/post/${postId}`, { method: 'POST', timeoutMs: 1_300_000 });
     showToast('Posted successfully!', 'success');
     setTimeout(loadDashboard, 800);
   } catch (e) {

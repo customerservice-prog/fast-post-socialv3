@@ -1,0 +1,2 @@
+# Root file so Railpack / Render / Nixpacks detect Python. Installs backend deps.
+-r backend/requirements.txt
