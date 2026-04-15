@@ -1,0 +1,83 @@
+{% extends "base_public.html" %}
+{% block title %}Pricing — FastPost Social{% endblock %}
+{% block content %}
+<header class="public-header">
+  <div class="public-inner public-header-row">
+    <a href="/" class="public-logo"><span class="logo-icon">&#9889;</span> FastPost</a>
+    <nav class="public-nav">
+      <a href="/">Home</a>
+      <a href="/register">Start free trial</a>
+      <a href="/login">Log in</a>
+    </nav>
+  </div>
+</header>
+
+<main class="public-main">
+  <div class="public-inner">
+    <h1>Pricing</h1>
+    <p class="muted section-sub">7-day app trial — no card required. Subscribe anytime for higher limits.</p>
+
+    <div class="pricing-cards">
+      <div class="card pricing-card">
+        <h2>Starter</h2>
+        <p class="price">$19<span class="per">/mo</span></p>
+        <ul class="pricing-list muted">
+          <li>1 business</li>
+          <li>Up to 1 post / day</li>
+        </ul>
+        <button type="button" class="btn btn-primary btn-block" data-plan="starter">Subscribe — Starter</button>
+      </div>
+      <div class="card pricing-card pricing-card--featured">
+        <h2>Growth</h2>
+        <p class="price">$49<span class="per">/mo</span></p>
+        <ul class="pricing-list muted">
+          <li>Up to 3 businesses</li>
+          <li>Up to 3 posts / day per business</li>
+        </ul>
+        <button type="button" class="btn btn-primary btn-block" data-plan="growth">Subscribe — Growth</button>
+      </div>
+      <div class="card pricing-card">
+        <h2>Agency</h2>
+        <p class="price">$99<span class="per">/mo</span></p>
+        <ul class="pricing-list muted">
+          <li>Unlimited businesses</li>
+          <li>Up to 3 posts / day per business</li>
+        </ul>
+        <button type="button" class="btn btn-primary btn-block" data-plan="agency">Subscribe — Agency</button>
+      </div>
+    </div>
+
+    <p class="muted" style="margin-top:24px;">
+      <a href="/register">Create an account</a> first (free trial). Paid checkout requires login.
+    </p>
+  </div>
+</main>
+
+<script>
+document.querySelectorAll('[data-plan]').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const plan = btn.getAttribute('data-plan');
+    try {
+      const res = await fetch('/api/billing/checkout', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        window.location.href = '/login?next=' + encodeURIComponent('/pricing');
+        return;
+      }
+      if (!res.ok) {
+        alert(data.error || 'Checkout unavailable');
+        return;
+      }
+      if (data.url) window.location.href = data.url;
+    } catch (e) {
+      alert('Could not start checkout');
+    }
+  });
+});
+</script>
+{% endblock %}

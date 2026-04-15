@@ -17,7 +17,14 @@ def main() -> None:
     os.close(fd)
     try:
         db = Database(path)
-        db.add_account("facebook", "http://fb.com/x", "http://biz.com", "Biz")
+        uid = db.create_user("t@t.com", "password123", display_name="T")
+        db.add_account(
+            "facebook",
+            "http://fb.com/x",
+            "http://biz.com",
+            "Biz",
+            user_id=uid,
+        )
         pid = db.add_post(1, "hello world promo", "morning_promo", "2026-01-01 09:00:00", "")
         conn = db.get_conn()
         conn.execute(

@@ -10,8 +10,26 @@ Captions are written for longer reads, topical depth, and natural keyword use
 import re
 from datetime import date
 from typing import List, Dict, Optional, Tuple
+from urllib.parse import urlparse
 
 from caption_dedup import max_similarity_vs_recent
+
+# Rotating discovery tags (IG gets more; FB gets a shorter subset). Niche beats generic for trust.
+_IG_DISCOVERY_POOL = [
+    "smallbusiness", "shoplocal", "supportlocal", "buylocal", "shopsmall",
+    "localbusiness", "entrepreneur", "businesstips", "growyourbusiness",
+    "marketingtips", "digitalmarketing", "contentstrategy", "communityfirst",
+    "supportsmallbusiness", "womeninbusiness", "startup", "businessowner",
+    "customerexperience", "valuefirst", "trustlocal", "shopsmallbusiness",
+    "locallove", "hustle", "mindset", "behindthescenes", "protips",
+    "howto", "explorepage", "instabusiness", "brandstory",
+]
+
+_FB_DISCOVERY_POOL = [
+    "SmallBusiness", "ShopLocal", "SupportLocal", "LocalBusiness",
+    "BusinessTips", "Entrepreneur", "CustomerFirst", "Community",
+    "ProTips", "HowTo", "GrowYourBusiness", "ShopSmall",
+]
 
 
 class AIContentGenerator:
@@ -51,13 +69,16 @@ class AIContentGenerator:
         platform: str,
         crawl_data: Optional[Dict] = None,
         recent_published_captions: Optional[List[str]] = None,
+        num_posts: int = 3,
     ) -> List[Dict]:
         """
-        Generate 3 posts for today: morning promo, afternoon tip, evening social proof.
+        Generate up to 3 posts for today: morning promo, afternoon tip, evening social proof.
+        num_posts: 1, 2, or 3 — takes the first N slots in that order.
         recent_published_captions: last ~30 published captions for this account (de-duplication).
         """
         today = date.today().strftime("%Y-%m-%d")
         ctx = self._extract_context(business_name, business_url, crawl_data)
+        ctx["today_weekday"] = date.today().strftime("%A")
         recent = list(recent_published_captions or [])[:30]
         ctx["recent_themes_hint"] = self._recent_themes_hint(recent)
         seed = date.today().toordinal() + len(business_name)
@@ -67,6 +88,8 @@ class AIContentGenerator:
             ("afternoon_tip", self.schedule["afternoon"], self._afternoon_tip),
             ("evening_proof", self.schedule["evening"], self._evening_proof),
         ]
+        n = max(1, min(3, int(num_posts or 3)))
+        posts_meta = posts_meta[:n]
 
         posts = []
         for post_type, time_str, builder in posts_meta:
@@ -76,6 +99,7 @@ class AIContentGenerator:
                 tries += 1
                 seed += 97
                 caption, image_prompt = builder(ctx, platform, seed)
+            caption = self._truncate_caption_for_platform(caption, platform)
             seed += 17
             posts.append(
                 {
@@ -115,6 +139,7 @@ class AIContentGenerator:
             "images": images[:6],
             "snippet_a": snippet_a,
             "snippet_b": snippet_b,
+            "url_host_slugs": self._host_slug_tokens(business_url),
         }
 
     def _clean_snippet(self, text: str, max_len: int) -> str:
@@ -127,6 +152,102 @@ class AIContentGenerator:
         if not options:
             return ""
         return options[seed % len(options)]
+
+    def _host_slug_tokens(self, url: str) -> List[str]:
+        """Domain stem for branded discovery tags (e.g. friendlyrental from friendlyrental.com)."""
+        out: List[str] = []
+        try:
+            host = (urlparse(url or "").netloc or "").split("@")[-1].split(":")[0].lower()
+            host = host.replace("www.", "")
+            if "." in host:
+                stem = host.split(".")[0]
+                if len(stem) >= 4 and stem.isalnum():
+                    out.append(stem)
+        except Exception:
+            pass
+        return out[:2]
+
+    def _phrase_to_hashtag_token(self, phrase: str, max_len: int = 28) -> str:
+        """Single hashtag body without # (letters/numbers only)."""
+        t = re.sub(r"[^a-zA-Z0-9]+", "", (phrase or "").replace(" ", "").lower())
+        return t[:max_len] if len(t) >= 3 else ""
+
+    def _unique_hashtag_string(self, bodies: List[str], cap: int) -> str:
+        seen = set()
+        tags: List[str] = []
+        for b in bodies:
+            n = re.sub(r"[^a-z0-9]", "", (b or "").lower())
+            if len(n) < 3 or n in seen:
+                continue
+            seen.add(n)
+            tags.append(f"#{n[:30]}")
+            if len(tags) >= cap:
+                break
+        return " ".join(tags)
+
+    def _weekday_discovery_tag(self, post_type: str, seed: int) -> str:
+        day = date.today().strftime("%A")
+        if post_type == "morning_promo":
+            return f"{day}Motivation" if seed % 2 == 0 else f"{day}Morning"
+        if post_type == "afternoon_tip":
+            return f"{day}Tips"
+        return f"{day}Thoughts"
+
+    def _build_facebook_hashtags(self, ctx: Dict, seed: int, post_type: str) -> str:
+        bodies: List[str] = []
+        bodies.append(self._weekday_discovery_tag(post_type, seed))
+        bn = self._phrase_to_hashtag_token(ctx["business_name"])
+        if bn:
+            bodies.append(bn)
+        for s in ctx["services"][:6]:
+            t = self._phrase_to_hashtag_token(s)
+            if t:
+                bodies.append(t)
+        for h in ctx["headings"][:4]:
+            t = self._phrase_to_hashtag_token(h)
+            if t:
+                bodies.append(t)
+        for u in ctx.get("url_host_slugs") or []:
+            if u:
+                bodies.append(u.lower())
+        n_extra = min(6, len(_FB_DISCOVERY_POOL))
+        for i in range(n_extra):
+            bodies.append(_FB_DISCOVERY_POOL[(seed + i * 3) % len(_FB_DISCOVERY_POOL)])
+        return self._unique_hashtag_string(bodies, cap=14)
+
+    def _build_instagram_hashtags(self, ctx: Dict, seed: int, post_type: str) -> str:
+        bodies: List[str] = []
+        bodies.append(self._weekday_discovery_tag(post_type, seed + 1))
+        bn = self._phrase_to_hashtag_token(ctx["business_name"])
+        if bn:
+            bodies.append(bn)
+        for s in ctx["services"][:10]:
+            t = self._phrase_to_hashtag_token(s)
+            if t:
+                bodies.append(t)
+        for h in ctx["headings"][:6]:
+            t = self._phrase_to_hashtag_token(h)
+            if t:
+                bodies.append(t)
+        for u in ctx.get("url_host_slugs") or []:
+            if u:
+                bodies.append(u.lower())
+        for i in range(24):
+            bodies.append(_IG_DISCOVERY_POOL[(seed + i * 7) % len(_IG_DISCOVERY_POOL)])
+        return self._unique_hashtag_string(bodies, cap=28)
+
+    def _truncate_caption_for_platform(self, caption: str, platform: str) -> str:
+        """Instagram caps at 2200 chars; leave margin when hashtags are appended."""
+        pl = platform.lower()
+        if pl not in ("instagram", "ig", "both"):
+            return caption
+        limit = 2180
+        if len(caption) <= limit:
+            return caption
+        cut = caption[: limit - 2]
+        if "\n\n" in cut:
+            cut = cut.rsplit("\n\n", 1)[0]
+        return cut.rstrip() + "…"
 
     def _topic_phrases(self, ctx: Dict, seed: int, limit: int = 5) -> List[str]:
         """Short topical phrases from crawl (for natural repetition / discovery)."""
@@ -274,7 +395,7 @@ class AIContentGenerator:
         )
         caption = "\n".join(p for p in parts if p is not None)
         caption = caption + self._facebook_semantic_footer(ctx, platform, seed)
-        caption = self._append_platform_tail(caption, ctx, platform, seed)
+        caption = self._append_platform_tail(caption, ctx, platform, seed, "morning_promo")
         img = self._image_prompt(name, ctx, "bright, welcoming, professional local business scene")
         return caption, img
 
@@ -323,7 +444,7 @@ class AIContentGenerator:
             f"— {name}"
         )
         caption = caption + self._facebook_semantic_footer(ctx, platform, seed + 2)
-        caption = self._append_platform_tail(caption, ctx, platform, seed + 2)
+        caption = self._append_platform_tail(caption, ctx, platform, seed + 2, "afternoon_tip")
         img = self._image_prompt(name, ctx, "helpful how-to vibe, clean and friendly")
         return caption, img
 
@@ -361,30 +482,25 @@ class AIContentGenerator:
             f"If this resonates, share it with someone who's in planning mode. Word-of-mouth is how local businesses like ours stay healthy."
         )
         caption = caption + self._facebook_semantic_footer(ctx, platform, seed + 4)
-        caption = self._append_platform_tail(caption, ctx, platform, seed + 4)
+        caption = self._append_platform_tail(caption, ctx, platform, seed + 4, "evening_proof")
         img = self._image_prompt(name, ctx, "warm community evening feel, authentic local business")
         return caption, img
 
-    def _append_platform_tail(self, caption: str, ctx: Dict, platform: str, seed: int) -> str:
+    def _append_platform_tail(
+        self, caption: str, ctx: Dict, platform: str, seed: int, post_type: str
+    ) -> str:
+        """Append discovery hashtags: Facebook + Instagram strategies when platform matches."""
         pl = platform.lower()
+        out = caption.rstrip()
+        if pl in ("facebook", "fb", "both"):
+            fb = self._build_facebook_hashtags(ctx, seed, post_type)
+            if fb:
+                out = f"{out}\n\n{fb}"
         if pl in ("instagram", "ig", "both"):
-            tags = self._build_hashtags(ctx["business_name"], ctx["services"], seed)
-            if tags:
-                return f"{caption.rstrip()}\n\n{tags}"
-        return caption
-
-    def _build_hashtags(self, business_name: str, services: List[str], seed: int) -> str:
-        raw = [business_name] + services
-        tags = []
-        for r in raw:
-            w = re.sub(r"[^a-zA-Z0-9]+", "", r.replace(" ", "").lower())
-            if len(w) >= 3 and w not in tags:
-                tags.append(f"#{w[:30]}")
-            if len(tags) >= 10:
-                break
-        if not tags:
-            tags = ["#localbusiness", "#smallbusiness", "#community"]
-        return " ".join(tags)
+            ig = self._build_instagram_hashtags(ctx, seed + 5, post_type)
+            if ig:
+                out = f"{out}\n\n{ig}"
+        return out
 
     def _image_prompt(self, business_name: str, ctx: Dict, mood: str) -> str:
         parts = [f"Photo concept for {business_name}: {mood}."]

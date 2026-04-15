@@ -6,54 +6,158 @@ Main API server for the AI Social Media Marketing Bot
 import os
 import json
 import logging
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
-from datetime import date
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote, urlparse
 
-from flask import Flask, request, jsonify, send_from_directory, abort, redirect
+import stripe
+from stripe.error import SignatureVerificationError
+from flask import (
+    Flask,
+    request,
+    jsonify,
+    send_from_directory,
+    abort,
+    redirect,
+    render_template,
+    url_for,
+)
+from flask_login import (
+    LoginManager,
+    current_user,
+    login_required,
+    login_user,
+    logout_user,
+)
 from itsdangerous import BadSignature, SignatureExpired
 from flask_cors import CORS
 from dotenv import load_dotenv
+from werkzeug.security import check_password_hash
+
+from auth_models import User
 from database import Database
+from email_service import mail_is_configured, send_password_reset_email
 from crawler import BusinessCrawler
 from ai_generator import AIContentGenerator
 from scheduler import PostScheduler
 import facebook_graph
-import caption_dedup
-import post_image
+from publish_service import publish_post_with_deps
+from subscription_limits import (
+    account_week_approved_for_current_week,
+    can_add_business,
+    effective_posts_per_day_for_account,
+    max_posts_per_day_for_plan,
+    effective_plan_code,
+)
 from stealth_poster import (
     StealthPoster,
     PROFILES_DIR,
     UPLOADED_STORAGE_NAME,
     profile_has_headless_session_data,
-    running_in_paas,
 )
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
-# No third-party API keys required; optional SECRET_KEY only for Flask session signing.
+_BACKEND_DIR = Path(__file__).resolve().parent
+app = Flask(__name__, template_folder=str(_BACKEND_DIR / "templates"))
 app.secret_key = os.getenv("SECRET_KEY", "fastpost-secret-key-change-in-production")
 CORS(app, supports_credentials=True)
 
-# Initialize core components
 db = Database()
 logger.info("SQLite path (set DATABASE_PATH for a persistent volume on Railway): %s", db.db_path)
+
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = "login_page"
+login_manager.session_protection = "strong"
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    row = db.get_user_by_id(int(user_id))
+    if not row:
+        return None
+    return User(row)
+
+
+@login_manager.unauthorized_handler
+def _unauthorized():
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "Login required"}), 401
+    next_url = request.path if request.path else ""
+    if request.query_string:
+        next_url += "?" + request.query_string.decode()
+    return redirect(url_for("login_page", next=next_url))
+
+
+# Initialize core components
 logger.info("PROFILES_DIR (set to /data/browser_profiles + volume for headless sessions): %s", PROFILES_DIR.resolve())
 facebook_graph.log_facebook_oauth_env_warnings()
 crawler = BusinessCrawler()
 ai_gen = AIContentGenerator()
-scheduler = PostScheduler(db=db, ai_gen=ai_gen)
-poster = StealthPoster(db=db)
 
 # One worker: Playwright/Chromium is heavy; serializes overlapping "Post now" clicks.
 _post_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="fastpost_post")
 
+poster = StealthPoster(db=db)
+scheduler = PostScheduler(db=db, ai_gen=ai_gen, poster=poster, post_executor=_post_executor)
+
 FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
+
+_stripe_key = (os.getenv("STRIPE_SECRET_KEY") or "").strip()
+if _stripe_key:
+    stripe.api_key = _stripe_key
+
+
+def _admin_email() -> str:
+    return (os.getenv("ADMIN_EMAIL") or "").strip().lower()
+
+
+def _is_admin_user() -> bool:
+    if not current_user.is_authenticated:
+        return False
+    ae = _admin_email()
+    return bool(ae) and str(current_user.email).lower() == ae
+
+
+def admin_required(f):
+    from functools import wraps
+
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not current_user.is_authenticated or not _is_admin_user():
+            abort(403)
+        return f(*args, **kwargs)
+
+    return decorated
+
+
+def _stripe_price_for_plan(plan: str) -> Optional[str]:
+    plan = (plan or "").lower().strip()
+    m = {
+        "starter": os.getenv("STRIPE_STARTER_PRICE_ID"),
+        "growth": os.getenv("STRIPE_GROWTH_PRICE_ID"),
+        "agency": os.getenv("STRIPE_AGENCY_PRICE_ID"),
+    }
+    pid = (m.get(plan) or "").strip()
+    return pid or None
+
+
+def _plan_for_stripe_price(price_id: str) -> Optional[str]:
+    price_id = (price_id or "").strip()
+    if not price_id:
+        return None
+    if price_id == (os.getenv("STRIPE_STARTER_PRICE_ID") or "").strip():
+        return "starter"
+    if price_id == (os.getenv("STRIPE_GROWTH_PRICE_ID") or "").strip():
+        return "growth"
+    if price_id == (os.getenv("STRIPE_AGENCY_PRICE_ID") or "").strip():
+        return "agency"
+    return None
 
 
 def _public_app_base() -> str:
@@ -131,24 +235,6 @@ def _suggested_facebook_callback_url() -> str:
     return f"https://<your-domain>{suffix}"
 
 
-def _post_via_facebook_graph(account: dict) -> bool:
-    plat = (account.get("platform") or "").lower()
-    if plat not in ("facebook", "fb", "both"):
-        return False
-    return bool(account.get("fb_page_id") and account.get("fb_page_access_token"))
-
-
-def _record_successful_publish(account_id: int, post_id: int, caption: str, post_type_internal: str) -> None:
-    """Archive publish for de-duplication + badge counts."""
-    label = caption_dedup.post_type_display(post_type_internal or "")
-    kw = caption_dedup.extract_keywords(caption or "")
-    db.insert_post_history(
-        account_id,
-        post_id,
-        label,
-        caption or "",
-        caption_dedup.keywords_to_json(kw),
-    )
 
 
 def _account_for_api(raw: dict, posts_sent: int = 0) -> dict:
@@ -161,6 +247,8 @@ def _account_for_api(raw: dict, posts_sent: int = 0) -> dict:
         "business_name",
         "created_at",
         "updated_at",
+        "posts_per_day",
+        "weekly_approved_iso_week",
     )
     out = {k: raw.get(k) for k in keys}
     crawl = None
@@ -192,6 +280,12 @@ def _account_for_api(raw: dict, posts_sent: int = 0) -> dict:
     )
     out["fb_graph_connected"] = bool(raw.get("fb_page_access_token"))
     out["posts_sent_count"] = int(posts_sent)
+    try:
+        ppd = int(raw.get("posts_per_day") or 3)
+    except (TypeError, ValueError):
+        ppd = 3
+    out["posts_per_day"] = max(1, min(3, ppd))
+    out["week_approval_active"] = account_week_approved_for_current_week(raw)
     return out
 
 
@@ -200,8 +294,58 @@ def _playwright_storage_file(account_id: int) -> Path:
 
 
 @app.route("/")
-def dashboard():
-    """Serve the dashboard UI (same origin as API for simple local use)."""
+def landing_page():
+    """Public marketing landing."""
+    pk = (os.getenv("STRIPE_PUBLISHABLE_KEY") or "").strip()
+    return render_template("landing.html", stripe_publishable_key=pk)
+
+
+@app.route("/pricing")
+def pricing_page():
+    pk = (os.getenv("STRIPE_PUBLISHABLE_KEY") or "").strip()
+    return render_template("pricing.html", stripe_publishable_key=pk)
+
+
+@app.route("/login")
+def login_page():
+    nxt = request.args.get("next") or "/dashboard"
+    if not nxt.startswith("/"):
+        nxt = "/dashboard"
+    return render_template("login.html", next_url=nxt)
+
+
+@app.route("/register")
+def register_page():
+    return render_template("register.html")
+
+
+@app.route("/forgot-password")
+def forgot_password_page():
+    return render_template("forgot_password.html")
+
+
+@app.route("/reset-password")
+def reset_password_page():
+    return render_template("reset_password.html", token=request.args.get("token") or "")
+
+
+@app.route("/billing")
+@login_required
+def billing_page():
+    return render_template("billing.html")
+
+
+@app.route("/admin")
+@login_required
+@admin_required
+def admin_page():
+    return render_template("admin.html")
+
+
+@app.route("/dashboard")
+@login_required
+def dashboard_app():
+    """Authenticated SPA shell."""
     return send_from_directory(FRONTEND_DIR, "index.html")
 
 
@@ -216,17 +360,322 @@ def frontend_static(filename):
     return send_from_directory(FRONTEND_DIR, filename)
 
 
+# ─── AUTH API ────────────────────────────────────────────────────────────────
+
+
+@app.route("/api/auth/me", methods=["GET"])
+def auth_me():
+    if not current_user.is_authenticated:
+        return jsonify({"user": None})
+    row = db.get_user_by_id(current_user.id)
+    if not row:
+        return jsonify({"user": None})
+    u = User(row)
+    out = u.to_public_dict()
+    out["effective_plan"] = effective_plan_code(row)
+    out["max_posts_per_day_cap"] = max_posts_per_day_for_plan(effective_plan_code(row))
+    return jsonify({"user": out})
+
+
+@app.route("/api/auth/register", methods=["POST"])
+def auth_register():
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    password = data.get("password") or ""
+    name = (data.get("display_name") or "").strip()
+    if not email or "@" not in email:
+        return jsonify({"error": "Valid email required"}), 400
+    if len(password) < 8:
+        return jsonify({"error": "Password must be at least 8 characters"}), 400
+    if db.get_user_by_email(email):
+        return jsonify({"error": "An account with this email already exists"}), 409
+    uid = db.create_user(email, password, display_name=name, trial_days=7)
+    row = db.get_user_by_id(uid)
+    login_user(User(row), remember=True)
+    return jsonify({"ok": True, "user": User(row).to_public_dict()})
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def auth_login():
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    password = data.get("password") or ""
+    row = db.get_user_by_email(email)
+    if not row or not check_password_hash(row["password_hash"], password):
+        return jsonify({"error": "Invalid email or password"}), 401
+    login_user(User(row), remember=bool(data.get("remember")))
+    return jsonify({"ok": True, "user": User(row).to_public_dict()})
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+@login_required
+def auth_logout():
+    logout_user()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/auth/forgot-password", methods=["POST"])
+def auth_forgot_password():
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    row = db.get_user_by_email(email) if email else None
+    if row:
+        raw = db.create_password_reset_token(int(row["id"]))
+        base = _public_app_base().rstrip("/")
+        link = f"{base}/reset-password?token={quote(raw)}"
+        if mail_is_configured():
+            ok, err = send_password_reset_email(email, link)
+            if not ok:
+                logger.warning("Password reset email failed for %s: %s — link: %s", email, err, link)
+        else:
+            logger.info("Password reset link for %s (email not configured): %s", email, link)
+    # Same response whether or not the address exists (avoid account enumeration).
+    return jsonify(
+        {
+            "ok": True,
+            "message": "If that email is registered, you will receive password reset instructions shortly.",
+        }
+    )
+
+
+@app.route("/api/auth/reset-password", methods=["POST"])
+def auth_reset_password_submit():
+    data = request.get_json(silent=True) or {}
+    token = data.get("token") or ""
+    password = data.get("password") or ""
+    if len(password) < 8:
+        return jsonify({"error": "Password must be at least 8 characters"}), 400
+    uid = db.consume_password_reset_token(str(token))
+    if not uid:
+        return jsonify({"error": "Invalid or expired reset link"}), 400
+    db.set_user_password(uid, password)
+    row = db.get_user_by_id(uid)
+    if row:
+        login_user(User(row), remember=True)
+    return jsonify({"ok": True})
+
+
+# ─── STRIPE ───────────────────────────────────────────────────────────────────
+
+
+@app.route("/api/billing/checkout", methods=["POST"])
+@login_required
+def billing_checkout():
+    if not _stripe_key:
+        return jsonify({"error": "Stripe is not configured"}), 503
+    data = request.get_json(silent=True) or {}
+    plan = (data.get("plan") or "").lower().strip()
+    price = _stripe_price_for_plan(plan)
+    if not price:
+        return jsonify({"error": "Unknown plan or price not configured"}), 400
+    base = _public_app_base().rstrip("/")
+    row = db.get_user_by_id(current_user.id)
+    cust = (row.get("stripe_customer_id") or "").strip() if row else ""
+    try:
+        kwargs = {
+            "mode": "subscription",
+            "client_reference_id": str(current_user.id),
+            "line_items": [{"price": price, "quantity": 1}],
+            "success_url": base + "/billing?session_id={CHECKOUT_SESSION_ID}",
+            "cancel_url": base + "/pricing",
+            "metadata": {"user_id": str(current_user.id), "plan": plan},
+        }
+        if cust:
+            kwargs["customer"] = cust
+        else:
+            kwargs["customer_email"] = current_user.email
+        sess = stripe.checkout.Session.create(**kwargs)
+    except Exception as e:
+        logger.exception("Stripe checkout failed")
+        return jsonify({"error": str(e) or "Checkout failed"}), 500
+    return jsonify({"url": sess.url})
+
+
+@app.route("/api/billing/portal", methods=["POST"])
+@login_required
+def billing_portal():
+    if not _stripe_key:
+        return jsonify({"error": "Stripe is not configured"}), 503
+    row = db.get_user_by_id(current_user.id)
+    cust = (row.get("stripe_customer_id") or "").strip() if row else ""
+    if not cust:
+        return jsonify({"error": "No Stripe customer yet — subscribe first"}), 400
+    base = _public_app_base().rstrip("/")
+    try:
+        sess = stripe.billing_portal.Session.create(
+            customer=cust,
+            return_url=base + "/billing",
+        )
+    except Exception as e:
+        logger.exception("Stripe portal failed")
+        return jsonify({"error": str(e) or "Portal failed"}), 500
+    return jsonify({"url": sess.url})
+
+
+@app.route("/api/stripe/webhook", methods=["POST"])
+def stripe_webhook():
+    wh_secret = (os.getenv("STRIPE_WEBHOOK_SECRET") or "").strip()
+    payload = request.get_data(as_text=False)
+    sig = request.headers.get("Stripe-Signature") or ""
+    if not wh_secret:
+        return jsonify({"error": "Webhook not configured"}), 503
+    try:
+        event = stripe.Webhook.construct_event(payload=payload, sig_header=sig, secret=wh_secret)
+    except ValueError:
+        return jsonify({"error": "Invalid payload"}), 400
+    except SignatureVerificationError:
+        return jsonify({"error": "Invalid signature"}), 400
+
+    et = event["type"]
+    obj = event["data"]["object"]
+
+    try:
+        if et == "checkout.session.completed":
+            uid = obj.get("client_reference_id") or (obj.get("metadata") or {}).get("user_id")
+            if uid:
+                uid = int(uid)
+                customer_id = obj.get("customer")
+                sub_id = obj.get("subscription")
+                if customer_id:
+                    db.update_user_subscription_fields(uid, stripe_customer_id=customer_id)
+                if sub_id:
+                    sub = stripe.Subscription.retrieve(sub_id)
+                    price_id = None
+                    try:
+                        price_id = sub["items"]["data"][0]["price"]["id"]
+                    except (KeyError, IndexError, TypeError):
+                        pass
+                    plan = _plan_for_stripe_price(price_id) if price_id else None
+                    st = (sub.get("status") or "").lower()
+                    cpe = sub.get("current_period_end")
+                    cpe_iso = None
+                    if cpe:
+                        try:
+                            cpe_iso = datetime.fromtimestamp(int(cpe), tz=timezone.utc).isoformat()
+                        except (ValueError, TypeError, OSError):
+                            cpe_iso = None
+                    db.update_user_subscription_fields(
+                        uid,
+                        stripe_subscription_id=sub_id,
+                        stripe_price_id=price_id,
+                        plan_code=plan or "starter",
+                        subscription_status=st or "active",
+                        subscription_current_period_end=cpe_iso,
+                    )
+        elif et in ("customer.subscription.updated", "customer.subscription.deleted"):
+            sub = obj
+            sub_id = sub.get("id")
+            customer_id = sub.get("customer")
+            st = (sub.get("status") or "").lower()
+            uid = None
+            if customer_id:
+                conn = db.get_conn()
+                r = conn.execute(
+                    "SELECT id FROM users WHERE stripe_customer_id = ?", (customer_id,)
+                ).fetchone()
+                conn.close()
+                if r:
+                    uid = int(r["id"])
+            if not uid and sub_id:
+                conn = db.get_conn()
+                r = conn.execute(
+                    "SELECT id FROM users WHERE stripe_subscription_id = ?", (sub_id,)
+                ).fetchone()
+                conn.close()
+                if r:
+                    uid = int(r["id"])
+            if uid:
+                price_id = None
+                try:
+                    items = sub.get("items", {}).get("data") or []
+                    if items:
+                        price_id = items[0].get("price", {}).get("id")
+                except (IndexError, TypeError):
+                    pass
+                plan = _plan_for_stripe_price(price_id) if price_id else None
+                cpe_iso = None
+                cpe = sub.get("current_period_end")
+                if cpe:
+                    try:
+                        cpe_iso = datetime.fromtimestamp(int(cpe), tz=timezone.utc).isoformat()
+                    except (ValueError, TypeError, OSError):
+                        cpe_iso = None
+                if et == "customer.subscription.deleted":
+                    db.update_user_subscription_fields(
+                        uid,
+                        stripe_subscription_id=None,
+                        subscription_status="canceled",
+                        subscription_current_period_end=cpe_iso,
+                    )
+                else:
+                    db.update_user_subscription_fields(
+                        uid,
+                        stripe_subscription_id=sub_id,
+                        stripe_price_id=price_id,
+                        plan_code=plan or db.get_user_by_id(uid).get("plan_code"),
+                        subscription_status=st or "active",
+                        subscription_current_period_end=cpe_iso,
+                    )
+    except Exception:
+        logger.exception("Stripe webhook handler error")
+        return jsonify({"received": True}), 200
+
+    return jsonify({"received": True})
+
+
+# ─── ADMIN API ────────────────────────────────────────────────────────────────
+
+
+@app.route("/api/admin/summary", methods=["GET"])
+@login_required
+@admin_required
+def admin_summary():
+    users = db.list_all_users()
+    return jsonify(
+        {
+            "users": users,
+            "total_users": len(users),
+            "total_accounts": db.count_all_accounts_global(),
+            "total_published_posts": db.count_all_published_posts_global(),
+        }
+    )
+
+
+@app.route("/api/admin/users/<int:user_id>/subscription", methods=["POST"])
+@login_required
+@admin_required
+def admin_override_subscription(user_id):
+    data = request.get_json(silent=True) or {}
+    plan = (data.get("plan_code") or "starter").strip().lower()
+    st = (data.get("subscription_status") or "active").strip().lower()
+    ok = db.admin_set_user_plan(user_id, plan, st)
+    if not ok:
+        return jsonify({"error": "User not found"}), 404
+    return jsonify({"ok": True})
+
+
 # ─── ACCOUNT ROUTES ──────────────────────────────────────────────────────────
 
 
 @app.route("/api/accounts", methods=["GET"])
+@login_required
 def get_accounts():
-    """Return all linked social media accounts"""
-    hist = db.get_post_history_counts()
-    accounts = [_account_for_api(dict(a), hist.get(int(a["id"]), 0)) for a in db.get_all_accounts()]
+    """Return linked social media accounts for the current user."""
+    uid = current_user.id
+    hist = db.get_post_history_counts(uid)
+    accounts = [
+        _account_for_api(dict(a), hist.get(int(a["id"]), 0))
+        for a in db.get_accounts_for_user(uid)
+    ]
+    row = db.get_user_by_id(uid)
+    can, reason = can_add_business(row, db.count_accounts_for_user(uid))
     return jsonify(
         {
             "accounts": accounts,
+            "plan": effective_plan_code(row) if row else "trial",
+            "can_add_business": can,
+            "add_business_blocked_reason": reason,
+            "max_posts_per_day_cap": max_posts_per_day_for_plan(effective_plan_code(row)) if row else 1,
             "posting_headless": bool(poster.headless),
             "facebook_oauth_configured": facebook_graph.facebook_oauth_configured(),
             **_facebook_api_extras(),
@@ -235,20 +684,28 @@ def get_accounts():
 
 
 @app.route("/api/dashboard", methods=["GET"])
+@login_required
 def get_dashboard():
     """Single payload for the Daily Queue UX: drafts, history, stats, account chips."""
+    uid = current_user.id
     today = date.today().strftime("%Y-%m-%d")
-    hist_counts = db.get_post_history_counts()
+    hist_counts = db.get_post_history_counts(uid)
+    row = db.get_user_by_id(uid)
+    can, reason = can_add_business(row, db.count_accounts_for_user(uid))
     return jsonify(
         {
-            "pending_today": db.get_todays_queue(),
-            "pending_other_days": db.get_pending_other_days(today, limit=20),
-            "published_today_count": db.count_published_today(),
-            "recent_published": db.get_recent_published_all(15),
+            "pending_today": db.get_todays_queue(uid),
+            "pending_other_days": db.get_pending_other_days(today, limit=20, user_id=uid),
+            "published_today_count": db.count_published_today(uid),
+            "recent_published": db.get_recent_published_all(15, user_id=uid),
             "accounts": [
-                _account_for_api(dict(a), hist_counts.get(int(a["id"]), 0)) for a in db.get_all_accounts()
+                _account_for_api(dict(a), hist_counts.get(int(a["id"]), 0))
+                for a in db.get_accounts_for_user(uid)
             ],
-            # False only on a desktop with FB_HEADED=1; cloud is always True (no window on your PC).
+            "plan": effective_plan_code(row) if row else "trial",
+            "can_add_business": can,
+            "add_business_blocked_reason": reason,
+            "max_posts_per_day_cap": max_posts_per_day_for_plan(effective_plan_code(row)) if row else 1,
             "posting_headless": bool(poster.headless),
             "facebook_oauth_configured": facebook_graph.facebook_oauth_configured(),
             **_facebook_api_extras(),
@@ -276,8 +733,16 @@ def _empty_crawl_payload(business_url: str, err: str) -> dict:
 
 
 @app.route("/api/accounts", methods=["POST"])
+@login_required
 def add_account():
     """Link a new social media account"""
+    uid = current_user.id
+    row = db.get_user_by_id(uid)
+    n_accounts = db.count_accounts_for_user(uid)
+    can, reason = can_add_business(row, n_accounts)
+    if not can:
+        return jsonify({"error": reason}), 403
+
     data = request.get_json(silent=True) or {}
     required = ["platform", "page_url", "business_url", "business_name"]
     if not isinstance(data, dict) or not all(k in data for k in required):
@@ -292,12 +757,22 @@ def add_account():
     if not all(fields[k] for k in required):
         return jsonify({"error": "All fields must be non-empty"}), 400
 
+    cap = max_posts_per_day_for_plan(effective_plan_code(row))
+    ppd = 3
+    try:
+        ppd = int(data.get("posts_per_day") or 3)
+    except (TypeError, ValueError):
+        ppd = 3
+    ppd = max(1, min(3, ppd, cap))
+
     account_id = db.add_account(
         platform=fields["platform"],
         page_url=fields["page_url"],
         business_url=fields["business_url"],
         business_name=fields["business_name"],
+        user_id=uid,
         session_data=None,
+        posts_per_day=ppd,
     )
     crawl_ok = True
     crawl_err = ""
@@ -327,16 +802,53 @@ def add_account():
 
 
 @app.route("/api/accounts/<int:account_id>", methods=["DELETE"])
+@login_required
 def delete_account(account_id):
     """Remove a linked account"""
-    db.delete_account(account_id)
+    if not db.get_account(account_id, current_user.id):
+        return jsonify({"error": "Account not found"}), 404
+    db.delete_account(account_id, user_id=current_user.id)
     return jsonify({"message": "Account removed"})
 
 
+@app.route("/api/accounts/<int:account_id>/posts-per-day", methods=["PATCH"])
+@login_required
+def patch_account_posts_per_day(account_id):
+    data = request.get_json(silent=True) or {}
+    row = db.get_user_by_id(current_user.id)
+    cap = max_posts_per_day_for_plan(effective_plan_code(row))
+    try:
+        want = int(data.get("posts_per_day") or 3)
+    except (TypeError, ValueError):
+        want = 3
+    want = max(1, min(3, want, cap))
+    if not db.update_account_posts_per_day(account_id, current_user.id, want):
+        return jsonify({"error": "Account not found"}), 404
+    return jsonify({"ok": True, "posts_per_day": want})
+
+
+@app.route("/api/accounts/<int:account_id>/weekly-approval", methods=["POST"])
+@login_required
+def weekly_approval_route(account_id):
+    data = request.get_json(silent=True) or {}
+    approved = bool(data.get("approved"))
+    if not db.set_weekly_approval(account_id, current_user.id, approved):
+        return jsonify({"error": "Account not found"}), 404
+    acc = db.get_account(account_id, current_user.id)
+    return jsonify(
+        {
+            "ok": True,
+            "week_approval_active": account_week_approved_for_current_week(acc or {}),
+            "weekly_approved_iso_week": (acc or {}).get("weekly_approved_iso_week"),
+        }
+    )
+
+
 @app.route("/api/accounts/<int:account_id>/playwright-storage", methods=["GET"])
+@login_required
 def playwright_storage_status(account_id):
     """Whether headless posting has session data (uploaded JSON and/or Chromium profile on disk)."""
-    if not db.get_account(account_id):
+    if not db.get_account(account_id, current_user.id):
         return jsonify({"error": "Account not found"}), 404
     pdir = (PROFILES_DIR / f"profile_{account_id}").resolve()
     path = _playwright_storage_file(account_id)
@@ -349,9 +861,10 @@ def playwright_storage_status(account_id):
 
 
 @app.route("/api/accounts/<int:account_id>/playwright-storage", methods=["POST"])
+@login_required
 def playwright_storage_save(account_id):
     """Save Playwright storage_state JSON (cookies + origins) for headless cloud posting."""
-    if not db.get_account(account_id):
+    if not db.get_account(account_id, current_user.id):
         return jsonify({"error": "Account not found"}), 404
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
@@ -368,9 +881,10 @@ def playwright_storage_save(account_id):
 
 
 @app.route("/api/accounts/<int:account_id>/playwright-storage", methods=["DELETE"])
+@login_required
 def playwright_storage_clear(account_id):
     """Remove uploaded Playwright storage for this account."""
-    if not db.get_account(account_id):
+    if not db.get_account(account_id, current_user.id):
         return jsonify({"error": "Account not found"}), 404
     path = _playwright_storage_file(account_id)
     if path.is_file():
@@ -379,15 +893,17 @@ def playwright_storage_clear(account_id):
 
 
 @app.route("/api/accounts/<int:account_id>/facebook/disconnect", methods=["POST"])
+@login_required
 def facebook_graph_disconnect(account_id):
     """Clear Facebook Graph API tokens (use Connect again to re-authorize)."""
-    if not db.get_account(account_id):
+    if not db.get_account(account_id, current_user.id):
         return jsonify({"error": "Account not found"}), 404
     db.clear_facebook_graph_token(account_id)
     return jsonify({"message": "Facebook disconnected", "fb_graph_connected": False})
 
 
 @app.route("/api/facebook/oauth/start", methods=["GET"])
+@login_required
 def facebook_oauth_start():
     """Redirect to Meta login; after approval, user returns to /api/facebook/oauth/callback."""
     app_id = (os.getenv("FACEBOOK_APP_ID") or "").strip()
@@ -418,7 +934,7 @@ def facebook_oauth_start():
     account_id = request.args.get("account_id", type=int)
     if not account_id:
         return jsonify({"error": "account_id query parameter is required"}), 400
-    if not db.get_account(account_id):
+    if not db.get_account(account_id, current_user.id):
         return jsonify({"error": "Account not found"}), 404
     try:
         url = facebook_graph.oauth_authorize_url(
@@ -435,36 +951,38 @@ def facebook_oauth_start():
 @app.route("/api/facebook/oauth/callback", methods=["GET"])
 def facebook_oauth_callback():
     """Meta redirects here with ?code=&state= — exchange token and store Page access token."""
+    base_dash = _public_app_base().rstrip("/") + "/dashboard"
     err = request.args.get("error_description") or request.args.get("error")
     if err:
-        return redirect(f"{_public_app_base()}/?fb_error={quote(err[:500])}")
+        return redirect(f"{base_dash}?fb_error={quote(err[:500])}")
     code = request.args.get("code")
     state = request.args.get("state")
     if not code or not state:
-        return redirect(f"{_public_app_base()}/?fb_error={quote('Missing authorization code')}")
+        return redirect(f"{base_dash}?fb_error={quote('Missing authorization code')}")
     try:
         aid, redirect_uri = facebook_graph.parse_oauth_state(state, app.secret_key)
     except SignatureExpired:
         return redirect(
-            f"{_public_app_base()}/?fb_error={quote('Session expired — open Accounts and click Connect Facebook again')}"
+            f"{base_dash}?fb_error={quote('Session expired — open Accounts and click Connect Facebook again')}"
         )
     except BadSignature:
-        return redirect(f"{_public_app_base()}/?fb_error={quote('Invalid OAuth state')}")
+        return redirect(f"{base_dash}?fb_error={quote('Invalid OAuth state')}")
     except ValueError as e:
-        return redirect(f"{_public_app_base()}/?fb_error={quote(str(e))}")
+        return redirect(f"{base_dash}?fb_error={quote(str(e))}")
     ok, msg = facebook_graph.complete_oauth_and_store(db, aid, code, redirect_uri=redirect_uri)
     if ok:
-        return redirect(f"{_public_app_base()}/?fb_connected=1")
-    return redirect(f"{_public_app_base()}/?fb_error={quote(msg or 'Facebook connection failed')}")
+        return redirect(f"{base_dash}?fb_connected=1")
+    return redirect(f"{base_dash}?fb_error={quote(msg or 'Facebook connection failed')}")
 
 
 # ─── CRAWL ROUTES ────────────────────────────────────────────────────────────
 
 
 @app.route("/api/crawl/<int:account_id>", methods=["POST"])
+@login_required
 def recrawl(account_id):
     """Re-crawl the business website to refresh content"""
-    account = db.get_account(account_id)
+    account = db.get_account(account_id, current_user.id)
     if not account:
         return jsonify({"error": "Account not found"}), 404
 
@@ -477,27 +995,32 @@ def recrawl(account_id):
 
 
 @app.route("/api/queue", methods=["GET"])
+@login_required
 def get_queue():
-    """Return today's post queue across all accounts"""
-    posts = db.get_todays_queue()
+    """Return today's post queue for the current user."""
+    posts = db.get_todays_queue(current_user.id)
     return jsonify({"posts": posts})
 
 
 @app.route("/api/queue/generate", methods=["POST"])
+@login_required
 def generate_posts():
-    """Generate AI posts for all accounts for today"""
+    """Generate AI posts for today for the current user's accounts."""
+    uid = current_user.id
+    user_row = db.get_user_by_id(uid)
     data = request.json or {}
-    account_id = data.get("account_id")  # Optional: generate for specific account
+    account_id = data.get("account_id")
 
     if account_id:
-        accounts = [db.get_account(account_id)]
+        accounts = [db.get_account(int(account_id), uid)]
     else:
-        accounts = db.get_all_accounts()
+        accounts = db.get_accounts_for_user(uid)
 
     generated = []
     for account in accounts:
         if not account:
             continue
+        n = effective_posts_per_day_for_account(user_row, account)
         crawl_data = db.get_crawl_data(account["id"])
         recent = db.get_recent_history_captions(account["id"], 30)
         posts = ai_gen.generate_daily_posts(
@@ -506,6 +1029,7 @@ def generate_posts():
             platform=account["platform"],
             crawl_data=crawl_data,
             recent_published_captions=recent,
+            num_posts=n,
         )
         for post in posts:
             post_id = db.add_post(
@@ -514,35 +1038,52 @@ def generate_posts():
                 post_type=post["type"],
                 scheduled_time=post["scheduled_time"],
                 image_prompt=post.get("image_prompt", ""),
+                user_id=uid,
             )
             generated.append(
                 {"id": post_id, "type": post["type"], "account": account["business_name"]}
             )
 
+        if user_row and account_week_approved_for_current_week(account):
+            pending = db.get_todays_pending_for_account(int(account["id"]))
+            for p in pending[:n]:
+                ok, err, _m = publish_post_with_deps(db, poster, _post_executor, int(p["id"]))
+                if ok:
+                    logger.info("Auto-published post_id=%s after manual generate", p["id"])
+                else:
+                    logger.warning("Auto-publish failed post_id=%s: %s", p["id"], err[:200])
+
     return jsonify({"generated": generated, "count": len(generated)})
 
 
 @app.route("/api/queue/<int:post_id>", methods=["GET"])
+@login_required
 def get_post(post_id):
     """Get a specific post from the queue"""
-    post = db.get_post(post_id)
+    post = db.get_post(post_id, current_user.id)
     if not post:
         return jsonify({"error": "Post not found — refresh the queue."}), 404
     return jsonify(post)
 
 
 @app.route("/api/queue/<int:post_id>", methods=["PUT"])
+@login_required
 def update_post(post_id):
     """Edit a post caption before publishing"""
+    if not db.get_post(post_id, current_user.id):
+        return jsonify({"error": "Post not found"}), 404
     data = request.json
-    db.update_post_caption(post_id, data.get("caption", ""))
+    db.update_post_caption(post_id, data.get("caption", ""), user_id=current_user.id)
     return jsonify({"message": "Post updated"})
 
 
 @app.route("/api/queue/<int:post_id>", methods=["DELETE"])
+@login_required
 def delete_post(post_id):
     """Delete a post from the queue"""
-    db.delete_post(post_id)
+    if not db.get_post(post_id, current_user.id):
+        return jsonify({"error": "Post not found"}), 404
+    db.delete_post(post_id, user_id=current_user.id)
     return jsonify({"message": "Post deleted"})
 
 
@@ -550,179 +1091,59 @@ def delete_post(post_id):
 
 
 @app.route("/api/post/<int:post_id>", methods=["POST"])
+@login_required
 def post_now(post_id):
-    """
-    Human-in-the-Loop: User triggered this.
-    Launches stealth browser to post to social media.
-    """
-    post = db.get_post(post_id)
+    """User-triggered publish (Facebook Graph or Playwright)."""
+    post = db.get_post(post_id, current_user.id)
     if not post:
         return jsonify(
             {
                 "error": (
                     "Post not found — it may have been deleted, or the server has a different "
-                    "database than when this page loaded. Refresh the queue and try again. "
-                    "(If you scaled to multiple instances without a shared disk/DB, use one instance "
-                    "or an external database.)"
+                    "database than when this page loaded. Refresh the queue and try again."
                 )
             }
         ), 404
 
-    account = db.get_account(post["account_id"])
-    if not account:
-        return jsonify({"error": "Account not found"}), 404
-
-    # Facebook Graph API: no Playwright — user clicked "Connect Facebook" once (OAuth).
-    if _post_via_facebook_graph(account):
-        img_bytes = post_image.render_share_image_jpeg(
-            account.get("business_name") or "",
-            post.get("caption") or "",
-            post.get("post_type") or "",
-        )
-        ok, err_msg = facebook_graph.post_page_photo(
-            str(account["fb_page_id"]),
-            account["fb_page_access_token"],
-            post["caption"],
-            img_bytes,
-        )
-        if not ok:
-            logger.warning(
-                "Facebook photo post failed (%s); retrying as text-only feed post",
-                err_msg[:300],
-            )
-            ok, err_msg = facebook_graph.post_page_feed(
-                str(account["fb_page_id"]),
-                account["fb_page_access_token"],
-                post["caption"],
-            )
-        if ok:
-            _record_successful_publish(account["id"], post_id, post["caption"], post.get("post_type") or "")
-            db.mark_post_published(post_id)
-            return jsonify(
-                {
-                    "message": "Posted successfully",
-                    "post_id": post_id,
-                    "posting_headless": bool(poster.headless),
-                    "method": "facebook_graph",
-                }
-            )
-        return jsonify({"error": err_msg or "Facebook API post failed"}), 500
-
-    # Railway/cloud: Playwright needs disk session OR use Graph API above — fail fast with the right hint.
-    plat = (account.get("platform") or "").lower()
-    prof = (PROFILES_DIR / f"profile_{account['id']}").resolve()
-    has_browser_session = profile_has_headless_session_data(prof)
-    if running_in_paas() and not has_browser_session:
-        if plat in ("facebook", "fb", "both"):
-            if facebook_graph.facebook_oauth_configured():
-                db_hint = ""
-                if os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PROJECT_ID"):
-                    dbp = (os.getenv("DATABASE_PATH") or "").strip()
-                    if not dbp or "fastpost.db" in dbp:
-                        db_hint = (
-                            " If you already connected before: SQLite may reset on each deploy unless "
-                            "DATABASE_PATH points to a persistent disk (e.g. /data/fastpost.db + Railway volume on /data). "
-                            "Then use Connect Facebook once more."
-                        )
-                return jsonify(
-                    {
-                        "error": (
-                            "No Facebook Page token saved for this account yet. In Accounts, click "
-                            "Connect Facebook, log in with Meta, and approve access — wait until you see "
-                            "\"Facebook connected\" (not an error). "
-                            "Your linked Page URL should be your Facebook Page link (or we match your business name to a Page you manage)."
-                            + db_hint
-                        ),
-                        "code": "facebook_graph_not_connected",
-                    }
-                ), 400
-            if (os.getenv("FACEBOOK_APP_ID") or "").strip() and (
-                os.getenv("FACEBOOK_APP_SECRET") or ""
-            ).strip():
-                want = _suggested_facebook_callback_url()
-                return jsonify(
-                    {
-                        "error": (
-                            f"Facebook Login is not ready. In Railway set PUBLIC_APP_URL=https://your-domain "
-                            f"(recommended) or FACEBOOK_REDIRECT_URI={want}. Add in Meta → Valid OAuth Redirect URIs "
-                            f"exactly: {want}. Remove any facebook.com value from FACEBOOK_REDIRECT_URI. "
-                            f"Redeploy, then Connect Facebook. Or use Session JSON. See DEPLOY.md."
-                        )
-                    }
-                ), 400
-            return jsonify(
-                {
-                    "error": (
-                        "On Railway, Facebook posts use Meta’s API: set FACEBOOK_APP_ID, "
-                        "FACEBOOK_APP_SECRET, and FACEBOOK_REDIRECT_URI, then Connect Facebook in Accounts. "
-                        "Alternatively use Session JSON and PROFILES_DIR on a /data volume. See DEPLOY.md."
-                    )
-                }
-            ), 400
-        return jsonify(
-            {
-                "error": (
-                    "Headless server has no browser session for this account. Use Accounts → Session JSON, "
-                    "and set PROFILES_DIR=/data/browser_profiles with a volume on /data. See DEPLOY.md."
-                )
-            }
-        ), 400
-
-    # Stay below ~15m platform HTTP limits (e.g. Railway) so we return JSON 504 instead of a dropped socket.
-    # Raise POST_TIMEOUT_SECONDS locally if headed login needs longer.
     timeout_s = int(os.getenv("POST_TIMEOUT_SECONDS", "840"))
-    try:
-        fut = _post_executor.submit(
-            poster.post,
-            account["platform"],
-            account["page_url"],
-            post["caption"],
-            account["id"],
-        )
-        result = fut.result(timeout=timeout_s)
-    except FutureTimeout:
-        return jsonify(
-            {
-                "error": (
-                    f"Posting ran longer than {timeout_s}s and was stopped. "
-                    "On the server, refresh your Playwright session under Accounts, confirm the Page URL, "
-                    "or raise POST_TIMEOUT_SECONDS if you use a headed browser locally."
-                )
-            }
-        ), 504
-    except Exception as e:
-        logger.exception("post_now crashed")
-        return jsonify({"error": str(e) or "Posting failed unexpectedly"}), 500
-
-    if result["success"]:
-        _record_successful_publish(account["id"], post_id, post["caption"], post.get("post_type") or "")
-        db.mark_post_published(post_id)
+    ok, err, method = publish_post_with_deps(
+        db, poster, _post_executor, post_id, timeout_s=timeout_s
+    )
+    if ok:
         return jsonify(
             {
                 "message": "Posted successfully",
                 "post_id": post_id,
                 "posting_headless": bool(poster.headless),
+                "method": method or "unknown",
             }
         )
-    else:
-        return jsonify({"error": result.get("error", "Unknown error")}), 500
+    status = 500
+    if err and ("longer than" in err or "timed out" in err.lower()):
+        status = 504
+    return jsonify({"error": err or "Posting failed"}), status
 
 
 # ─── ANALYTICS ROUTES ────────────────────────────────────────────────────────
 
 
 @app.route("/api/analytics", methods=["GET"])
+@login_required
 def get_analytics():
     """Return post performance analytics"""
-    stats = db.get_analytics()
-    stats["recent_posts"] = db.get_recent_published_all(40)
+    uid = current_user.id
+    stats = db.get_analytics(uid)
+    stats["recent_posts"] = db.get_recent_published_all(40, user_id=uid)
     return jsonify(stats)
 
 
 @app.route("/api/analytics/<int:account_id>", methods=["GET"])
+@login_required
 def get_account_analytics(account_id):
     """Return analytics for a specific account"""
-    stats = db.get_account_analytics(account_id)
+    if not db.get_account(account_id, current_user.id):
+        return jsonify({"error": "Account not found"}), 404
+    stats = db.get_account_analytics(account_id, user_id=current_user.id)
     return jsonify(stats)
 
 
@@ -730,6 +1151,7 @@ def get_account_analytics(account_id):
 
 
 @app.route("/api/scheduler/start", methods=["POST"])
+@login_required
 def start_scheduler():
     """Start the automatic post generation scheduler"""
     scheduler.start()
@@ -737,6 +1159,7 @@ def start_scheduler():
 
 
 @app.route("/api/scheduler/stop", methods=["POST"])
+@login_required
 def stop_scheduler():
     """Stop the scheduler"""
     scheduler.stop()
@@ -744,6 +1167,7 @@ def stop_scheduler():
 
 
 @app.route("/api/scheduler/status", methods=["GET"])
+@login_required
 def scheduler_status():
     """Get scheduler status"""
     return jsonify({"running": scheduler.is_running(), "next_run": scheduler.next_run()})

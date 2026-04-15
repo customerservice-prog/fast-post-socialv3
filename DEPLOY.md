@@ -28,11 +28,29 @@ Pinned configuration in this repo (commit and redeploy from **`main`**):
 | `FACEBOOK_APP_SECRET` | Same app (keep private). |
 | `PUBLIC_APP_URL` | **Recommended:** `https://YOUR_DOMAIN` only (no path). The app builds the OAuth callback as `PUBLIC_APP_URL` + `/api/facebook/oauth/callback`. |
 | `FACEBOOK_REDIRECT_URI` | Optional if `PUBLIC_APP_URL` is set; otherwise required. Must be `https://YOUR_DOMAIN/api/facebook/oauth/callback` and match **Valid OAuth Redirect URIs** in Meta exactly. Never a `facebook.com` URL. |
+| `SECRET_KEY` | **Required for production:** long random string for Flask sessions (login). |
+| `STRIPE_SECRET_KEY` | Stripe Dashboard — for Checkout, Billing Portal, webhooks. |
+| `STRIPE_PUBLISHABLE_KEY` | Stripe publishable key (pricing page / future client use). |
+| `STRIPE_WEBHOOK_SECRET` | Webhook signing secret for `POST /api/stripe/webhook`. |
+| `STRIPE_STARTER_PRICE_ID` | Price ID for Starter plan ($19/mo product). |
+| `STRIPE_GROWTH_PRICE_ID` | Price ID for Growth plan. |
+| `STRIPE_AGENCY_PRICE_ID` | Price ID for Agency plan. |
+| `ADMIN_EMAIL` | Lowercase email of the owner account; enables **`/admin`**. |
+| `MAIL_SERVER` | SMTP host for **password reset** emails (optional; see below). |
+| `MAIL_PORT` | SMTP port (default **587** with TLS). Use **465** with `MAIL_USE_SSL=1`. |
+| `MAIL_USE_TLS` | `1` for STARTTLS (typical on 587). |
+| `MAIL_USE_SSL` | `1` for SMTP_SSL (typical on 465). |
+| `MAIL_USERNAME` | SMTP auth user (SendGrid: **`apikey`**). |
+| `MAIL_PASSWORD` | SMTP password (SendGrid: API key). |
+| `MAIL_DEFAULT_SENDER` | From header, e.g. `FastPost <no-reply@yourdomain.com>`. |
 
 3. **Volume:** mount at **`/data`** and set **`DATABASE_PATH=/data/fastpost.db`**. Without this, SQLite lives on ephemeral disk and **accounts disappear on every redeploy** (the app will log the DB path at startup).
 4. **Posting:** runs **headless** on the server — no browser window on your PC (see Settings in the app).
 5. **Facebook (recommended):** add a Meta app with **Facebook Login**; set the `FACEBOOK_*` variables and the redirect URI above. In the app: **Accounts → Connect Facebook** once per account, then **Post now** uses the **Graph API** (no JSON files, no Chromium for Facebook). Until the app is **Live**, add your Facebook user under the app’s **Roles** so you can authorize.
 6. **Fallback:** **Accounts → Session JSON** (Playwright storage) still works for Instagram-only or if you skip the Meta app. Keep **`PROFILES_DIR` on `/data`** if you use it.
+7. **App URL:** The marketing site is **`/`**; the dashboard is **`/dashboard`** (requires login). Set **`PUBLIC_APP_URL`** to `https://YOUR_DOMAIN` so Facebook OAuth, Stripe success/cancel URLs, and password-reset links point at the correct host.
+8. **Stripe:** In Stripe Dashboard, create products/prices for Starter / Growth / Agency; paste **Price IDs** into Railway. Add webhook endpoint **`https://YOUR_DOMAIN/api/stripe/webhook`** and select events: `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`. Paste the **signing secret** into `STRIPE_WEBHOOK_SECRET`.
+9. **Password reset email:** If **`MAIL_SERVER`** is unset, reset links are **logged only** (see service logs). To send mail, configure SMTP — e.g. **SendGrid:** `MAIL_SERVER=smtp.sendgrid.net`, `MAIL_PORT=587`, `MAIL_USERNAME=apikey`, `MAIL_PASSWORD=<SendGrid API key>`, `MAIL_DEFAULT_SENDER=FastPost <no-reply@yourdomain.com>`, `MAIL_USE_TLS=1`. Verify the sender domain in SendGrid (or your provider).
 
 ### Meta app: “Can’t load URL” / App Domains
 
@@ -61,7 +79,8 @@ From the repo root, run **`python scripts/print_railway_facebook_vars.py`** (opt
 ## Smoke checks (after deploy)
 
 - `GET https://<your-host>/api/health` → JSON with `"status":"ok"`, `"posting_headless": true` on cloud; `"facebook_oauth_configured": true` and `"facebook_redirect_uri_valid": true` only when **`FACEBOOK_REDIRECT_URI`** is your site’s callback (not a `facebook.com` URL).
-- `GET https://<your-host>/api/dashboard` → includes `"posting_headless"`, `"facebook_oauth_configured"`, and `"facebook_redirect_uri_valid"`.
+- **`GET /api/dashboard`** requires a **logged-in session** (cookie). Smoke it in a browser: register at **`/register`**, open **`/dashboard`**, or use `curl` with a cookie jar after `POST /api/auth/login`.
+- **`GET /`** → public landing; **`GET /pricing`** → pricing page.
 
 Local (from clone):
 

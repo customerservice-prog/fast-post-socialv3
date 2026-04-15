@@ -23,9 +23,33 @@ let sessionModalAccountId = null;
 let facebookOAuthConfigured = false;
 /** Callback URL this site uses for Facebook (copy into Meta → Valid OAuth Redirect URIs). */
 let facebookOauthRedirectUri = '';
+/** Plan cap for posts/day (1–3 from server). */
+let maxPostsCap = 3;
+/** Whether the user can add another linked business (plan limit). */
+let canAddBusiness = true;
+let addBusinessBlockedReason = '';
 
-document.addEventListener('DOMContentLoaded', () => {
-  initConstructionOverlay();
+async function ensureSession() {
+  try {
+    const r = await fetch(`${API}/auth/me`, { credentials: 'include' });
+    const d = await r.json().catch(() => ({}));
+    if (!d.user) {
+      const next = encodeURIComponent(window.location.pathname || '/dashboard');
+      window.location.href = `/login?next=${next}`;
+      return false;
+    }
+    const em = document.getElementById('sidebarUserEmail');
+    if (em) em.textContent = d.user.email || '';
+    return true;
+  } catch {
+    window.location.href = '/login?next=' + encodeURIComponent('/dashboard');
+    return false;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  const ok = await ensureSession();
+  if (!ok) return;
   initFacebookOAuthLandingParams();
 
   document.getElementById('todayDate').textContent = new Date().toLocaleDateString('en-US', {
@@ -59,6 +83,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.target === e.currentTarget) closeSessionModal();
   });
 
+  document.getElementById('btnLogout')?.addEventListener('click', async () => {
+    try {
+      await apiFetch('/auth/logout', { method: 'POST' });
+    } catch { /* ignore */ }
+    window.location.href = '/';
+  });
+
   document.getElementById('queueGrid').addEventListener('click', onQueueCardClick);
   document.getElementById('queueGridOlder').addEventListener('click', onQueueCardClick);
 
@@ -73,13 +104,13 @@ function initFacebookOAuthLandingParams() {
       'Facebook connected. Post now uses the official API — no session JSON needed for this Page.',
       'success',
     );
-    history.replaceState({}, '', window.location.pathname + window.location.hash);
+    history.replaceState({}, '', '/dashboard' + window.location.hash);
     navigateTo('accounts');
   }
   const fe = q.get('fb_error');
   if (fe) {
     showToast(decodeURIComponent(fe), 'error');
-    history.replaceState({}, '', window.location.pathname + window.location.hash);
+    history.replaceState({}, '', '/dashboard' + window.location.hash);
   }
 }
 
@@ -179,40 +210,6 @@ function onQueueCardClick(ev) {
   }
 }
 
-/**
- * Shown on every full page load / refresh. Dismiss with Enter or Continue.
- */
-function initConstructionOverlay() {
-  const el = document.getElementById('constructionOverlay');
-  if (!el) return;
-
-  const dismiss = () => {
-    el.classList.add('hidden');
-    el.setAttribute('aria-hidden', 'true');
-    document.body.classList.remove('construction-locked');
-  };
-
-  document.body.classList.add('construction-locked');
-  el.classList.remove('hidden');
-  el.setAttribute('aria-hidden', 'false');
-
-  const btn = document.getElementById('constructionEnterBtn');
-  btn?.focus();
-
-  const onEnter = (e) => {
-    if (e.key !== 'Enter') return;
-    if (el.classList.contains('hidden')) return;
-    e.preventDefault();
-    dismiss();
-    document.removeEventListener('keydown', onEnter);
-  };
-  document.addEventListener('keydown', onEnter);
-  btn?.addEventListener('click', () => {
-    dismiss();
-    document.removeEventListener('keydown', onEnter);
-  });
-}
-
 function navigateTo(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item').forEach(item => {
@@ -238,7 +235,9 @@ async function loadDashboard() {
   try {
     const data = await apiFetch('/dashboard');
     accounts = data.accounts || [];
+    if (typeof data.max_posts_per_day_cap === 'number') maxPostsCap = data.max_posts_per_day_cap;
     postingHeadless = data.posting_headless !== false;
+    syncAccountPlanLimit(data);
     syncFacebookOAuthFromPayload(data);
     document.getElementById('statAccounts').textContent = accounts.length;
     document.getElementById('statPending').textContent = (data.pending_today || []).length;
@@ -317,7 +316,7 @@ function renderAccountsStrip(accs) {
     <div class="account-chip ${a.crawl_ready ? 'account-chip--ok' : 'account-chip--warn'}">
       <span class="account-chip-icon" aria-hidden="true">${platformEmoji(a.platform)}</span>
       <span class="account-chip-name">${escHtml(a.business_name)}</span>
-      <span class="account-chip-meta">${escHtml(platformLabel(a.platform))}${a.crawl_pages != null ? ' · ' + a.crawl_pages + ' pages' : ''}</span>
+      <span class="account-chip-meta">${escHtml(platformLabel(a.platform))}${a.crawl_pages != null ? ' · ' + a.crawl_pages + ' pages' : ''}${a.week_approval_active ? ' · <strong>Week approved ✓</strong>' : ' · Pending approval'}</span>
     </div>
   `).join('');
 }
@@ -518,7 +517,9 @@ async function loadAccounts() {
   try {
     const data = await apiFetch('/accounts');
     accounts = data.accounts || [];
+    if (typeof data.max_posts_per_day_cap === 'number') maxPostsCap = data.max_posts_per_day_cap;
     if (typeof data.posting_headless === 'boolean') postingHeadless = data.posting_headless;
+    syncAccountPlanLimit(data);
     syncFacebookOAuthFromPayload(data);
     renderAccounts(accounts);
     document.getElementById('statAccounts').textContent = accounts.length;
@@ -527,8 +528,46 @@ async function loadAccounts() {
   }
 }
 
+function postsPerDayOptions(selected, cap) {
+  const c = Math.min(3, Math.max(1, cap || 3));
+  const opts = [];
+  for (let n = 1; n <= c; n += 1) {
+    opts.push(`<option value="${n}"${n === selected ? ' selected' : ''}>${n} post${n === 1 ? '' : 's'}/day</option>`);
+  }
+  return opts.join('');
+}
+
+async function onPostsPerDayChange(accountId, value) {
+  try {
+    await apiFetch(`/accounts/${accountId}/posts-per-day`, {
+      method: 'PATCH',
+      body: JSON.stringify({ posts_per_day: Number(value) }),
+    });
+    showToast('Posts per day updated', 'success');
+    await loadAccounts();
+    loadDashboard();
+  } catch (e) {
+    showToast(e.message || 'Could not update', 'error');
+  }
+}
+
+async function setWeeklyApproval(accountId, approved) {
+  try {
+    await apiFetch(`/accounts/${accountId}/weekly-approval`, {
+      method: 'POST',
+      body: JSON.stringify({ approved }),
+    });
+    showToast(approved ? 'Week approved — scheduler will auto-publish.' : 'Weekly approval revoked.', 'info');
+    await loadAccounts();
+    loadDashboard();
+  } catch (e) {
+    showToast(e.message || 'Could not update approval', 'error');
+  }
+}
+
 function renderAccounts(accs) {
   const list = document.getElementById('accountsList');
+  const cap = maxPostsCap;
   if (!accs.length) {
     list.innerHTML = `
       <div class="empty-state">
@@ -557,6 +596,18 @@ function renderAccounts(accs) {
         </div>
         ${acc.crawl_summary_preview ? `<p class="crawl-preview">${escHtml(acc.crawl_summary_preview)}</p>` : ''}
         <p class="next-step-hint">${escHtml(acc.next_step_hint || '')}</p>
+        <div class="posts-per-day-select">
+          <label for="ppd-${acc.id}">Posts / day</label>
+          <select id="ppd-${acc.id}" data-account-id="${acc.id}">
+            ${postsPerDayOptions(Number(acc.posts_per_day) || 3, cap)}
+          </select>
+        </div>
+        <div class="weekly-approval-row">
+          <span class="muted">${acc.week_approval_active ? 'Week approved ✓' : 'Pending approval'}</span>
+          ${acc.week_approval_active
+    ? `<button type="button" class="btn btn-secondary btn-sm" data-revoke-weekly="${acc.id}">Revoke week</button>`
+    : `<button type="button" class="btn btn-primary btn-sm" data-approve-weekly="${acc.id}">Approve for the week</button>`}
+        </div>
       </div>
       <div class="account-actions">
         ${facebookOAuthConfigured && isFacebookishPlatform(acc.platform) && !acc.fb_graph_connected ? `<button type="button" class="btn btn-primary" onclick="connectFacebook(${acc.id})" title="Official Facebook Login — no JSON files">Connect Facebook</button>` : ''}
@@ -568,6 +619,17 @@ function renderAccounts(accs) {
       </div>
     </div>
   `).join('');
+  list.querySelectorAll('select[data-account-id]').forEach(sel => {
+    sel.addEventListener('change', () => {
+      onPostsPerDayChange(Number(sel.dataset.accountId), sel.value);
+    });
+  });
+  list.querySelectorAll('[data-approve-weekly]').forEach(btn => {
+    btn.addEventListener('click', () => setWeeklyApproval(Number(btn.dataset.approveWeekly), true));
+  });
+  list.querySelectorAll('[data-revoke-weekly]').forEach(btn => {
+    btn.addEventListener('click', () => setWeeklyApproval(Number(btn.dataset.revokeWeekly), false));
+  });
 }
 
 async function addAccount(e) {
@@ -770,6 +832,7 @@ async function apiFetch(path, options = {}) {
   try {
     res = await fetch(API + path, {
       ...fetchOpts,
+      credentials: 'include',
       signal: ctrl ? ctrl.signal : fetchOpts.signal,
       headers: { 'Content-Type': 'application/json', ...optHeaders },
     });

@@ -1,0 +1,31 @@
+{% extends "base_public.html" %}
+{% block title %}Billing — FastPost{% endblock %}
+{% block content %}
+<div class="auth-wrap public-inner">
+  <div class="card auth-card">
+    <h1>Billing</h1>
+    <p class="muted">Manage your subscription in Stripe’s customer portal.</p>
+    <button type="button" class="btn btn-primary" id="portalBtn">Open billing portal</button>
+    <p id="portalErr" class="form-error hidden"></p>
+    <p style="margin-top:16px;"><a href="/dashboard">← Back to dashboard</a> · <a href="/pricing">Pricing</a></p>
+  </div>
+</div>
+<script>
+  document.getElementById('portalBtn').addEventListener('click', async () => {
+    const err = document.getElementById('portalErr');
+    err.classList.add('hidden');
+    const res = await fetch('/api/billing/portal', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      err.textContent = data.error || 'Portal unavailable';
+      err.classList.remove('hidden');
+      return;
+    }
+    if (data.url) window.location.href = data.url;
+  });
+</script>
+{% endblock %}

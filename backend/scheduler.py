@@ -1,7 +1,7 @@
 """
 FastPost Social v3 - Post Scheduler
 Uses APScheduler to auto-generate posts daily at 7 AM
-The scheduler generates draft posts - humans still approve before posting
+When weekly approval is on for the current ISO week, publishes today's drafts automatically (Graph or Playwright).
 """
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -10,13 +10,21 @@ from datetime import datetime
 import pytz
 import logging
 
+from publish_service import publish_post_with_deps
+from subscription_limits import (
+    account_week_approved_for_current_week,
+    effective_posts_per_day_for_account,
+)
+
 logger = logging.getLogger(__name__)
 
 
 class PostScheduler:
-    def __init__(self, db, ai_gen, timezone: str = "America/New_York"):
+    def __init__(self, db, ai_gen, poster, post_executor, timezone: str = "America/New_York"):
         self.db = db
         self.ai_gen = ai_gen
+        self.poster = poster
+        self.post_executor = post_executor
         self.timezone = pytz.timezone(timezone)
         self.scheduler = BackgroundScheduler(timezone=self.timezone)
         self._setup_jobs()
@@ -57,6 +65,13 @@ class PostScheduler:
         generated_count = 0
         for account in accounts:
             try:
+                uid = account.get("user_id")
+                user_row = self.db.get_user_by_id(int(uid)) if uid is not None else None
+                if not user_row:
+                    logger.warning("[Scheduler] Skipping account %s — no user row", account.get("id"))
+                    continue
+
+                n = effective_posts_per_day_for_account(user_row, account)
                 crawl_data = self.db.get_crawl_data(account["id"])
                 recent = self.db.get_recent_history_captions(account["id"], 30)
                 posts = self.ai_gen.generate_daily_posts(
@@ -65,6 +80,7 @@ class PostScheduler:
                     platform=account["platform"],
                     crawl_data=crawl_data,
                     recent_published_captions=recent,
+                    num_posts=n,
                 )
                 for post in posts:
                     self.db.add_post(
@@ -73,12 +89,36 @@ class PostScheduler:
                         post_type=post["type"],
                         scheduled_time=post["scheduled_time"],
                         image_prompt=post.get("image_prompt", ""),
+                        user_id=int(uid),
                     )
                     generated_count += 1
 
                 logger.info(
                     f"[Scheduler] Generated {len(posts)} posts for {account['business_name']}"
                 )
+
+                if account_week_approved_for_current_week(account):
+                    pending = self.db.get_todays_pending_for_account(int(account["id"]))
+                    cap = n
+                    for p in pending[:cap]:
+                        ok, err, _meth = publish_post_with_deps(
+                            self.db,
+                            self.poster,
+                            self.post_executor,
+                            int(p["id"]),
+                        )
+                        if ok:
+                            logger.info(
+                                "[Scheduler] Auto-published post_id=%s for account %s",
+                                p["id"],
+                                account["id"],
+                            )
+                        else:
+                            logger.warning(
+                                "[Scheduler] Auto-publish failed post_id=%s: %s",
+                                p["id"],
+                                err[:200],
+                            )
 
             except Exception as e:
                 logger.error(

@@ -1,0 +1,53 @@
+{% extends "base_public.html" %}
+{% block title %}FastPost Social — Daily drafts from your website{% endblock %}
+{% block content %}
+<header class="public-header">
+  <div class="public-inner public-header-row">
+    <a href="/" class="public-logo"><span class="logo-icon" aria-hidden="true">&#9889;</span> FastPost</a>
+    <nav class="public-nav">
+      <a href="/pricing">Pricing</a>
+      <a href="/login">Log in</a>
+      <a class="btn btn-primary btn-sm" href="/register">Start free trial</a>
+    </nav>
+  </div>
+</header>
+
+<main class="public-main">
+  <section class="hero public-inner">
+    <p class="construction-badge" style="margin-bottom:12px;">Social media, without the blank page</p>
+    <h1 class="hero-title">Turn your website into daily post drafts — you stay in control.</h1>
+    <p class="hero-lead">
+      FastPost crawls your business site, generates on-brand captions for Facebook and Instagram,
+      and keeps a clear queue you can edit, approve, and publish.
+    </p>
+    <div class="hero-cta-row">
+      <a class="btn btn-primary" href="/register">Start 7-day free trial</a>
+      <a class="btn btn-secondary" href="/pricing">View pricing</a>
+    </div>
+  </section>
+
+  <section class="public-inner feature-grid">
+    <div class="card">
+      <h3>Daily drafts</h3>
+      <p class="muted">Scheduled promos, tips, and community-style posts built from your real services and pages.</p>
+    </div>
+    <div class="card">
+      <h3>Human approval</h3>
+      <p class="muted">Nothing goes live until you’re happy — or approve a full week and let the scheduler handle the rest.</p>
+    </div>
+    <div class="card">
+      <h3>Facebook-ready</h3>
+      <p class="muted">Connect Meta once for API posting from the cloud, or use advanced browser session upload.</p>
+    </div>
+  </section>
+
+  <section class="public-inner pricing-peek">
+    <h2>Simple plans</h2>
+    <p class="muted">Starter from $19/mo — see <a href="/pricing">pricing</a> for details and Stripe checkout.</p>
+  </section>
+</main>
+
+<footer class="public-footer public-inner">
+  <p class="muted">&copy; FastPost Social · <a href="/login">Log in</a></p>
+</footer>
+{% endblock %}

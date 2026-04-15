@@ -1,0 +1,49 @@
+{% extends "base_public.html" %}
+{% block title %}Register — FastPost{% endblock %}
+{% block content %}
+<div class="auth-wrap public-inner">
+  <div class="card auth-card">
+    <h1>Create account</h1>
+    <p class="muted">7-day free trial — no credit card. Already have an account? <a href="/login">Log in</a></p>
+    <form id="regForm" class="account-form">
+      <div class="form-group">
+        <label for="name">Display name (optional)</label>
+        <input type="text" id="name" autocomplete="name" />
+      </div>
+      <div class="form-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" required autocomplete="email" />
+      </div>
+      <div class="form-group">
+        <label for="password">Password (8+ characters)</label>
+        <input type="password" id="password" required autocomplete="new-password" minlength="8" />
+      </div>
+      <button type="submit" class="btn btn-primary btn-block">Start free trial</button>
+    </form>
+    <p id="regErr" class="form-error hidden"></p>
+  </div>
+</div>
+<script>
+  document.getElementById('regForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const err = document.getElementById('regErr');
+    err.classList.add('hidden');
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+    const display_name = document.getElementById('name').value.trim();
+    const res = await fetch('/api/auth/register', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, display_name }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      err.textContent = data.error || 'Registration failed';
+      err.classList.remove('hidden');
+      return;
+    }
+    window.location.href = '/dashboard';
+  });
+</script>
+{% endblock %}

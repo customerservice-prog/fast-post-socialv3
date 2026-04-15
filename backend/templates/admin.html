@@ -1,0 +1,60 @@
+{% extends "base_public.html" %}
+{% block title %}Admin — FastPost{% endblock %}
+{% block content %}
+<div class="public-inner" style="max-width:900px;margin:0 auto;padding:24px;">
+  <h1>Admin</h1>
+  <p id="load">Loading…</p>
+  <div id="stats" class="stats-row hidden"></div>
+  <div id="users" class="card hidden" style="margin-top:20px;overflow:auto;"></div>
+</div>
+<script>
+  async function load() {
+    const res = await fetch('/api/admin/summary', { credentials: 'include' });
+    const el = document.getElementById('load');
+    if (res.status === 403) {
+      el.textContent = 'Forbidden';
+      return;
+    }
+    const data = await res.json();
+    el.classList.add('hidden');
+    const st = document.getElementById('stats');
+    st.classList.remove('hidden');
+    st.innerHTML = `
+      <div class="stat-card"><div class="stat-number">${data.total_users}</div><div class="stat-label">Users</div></div>
+      <div class="stat-card"><div class="stat-number">${data.total_accounts}</div><div class="stat-label">Businesses</div></div>
+      <div class="stat-card"><div class="stat-number">${data.total_published_posts}</div><div class="stat-label">Posts published</div></div>
+    `;
+    const u = document.getElementById('users');
+    u.classList.remove('hidden');
+    u.innerHTML = '<h2>Users</h2>' + (data.users || []).map(row => {
+      const pc = row.plan_code || 'trial';
+      const opt = (v) => `<option value="${v}"${pc === v ? ' selected' : ''}>${v}</option>`;
+      return `
+      <div style="border-bottom:1px solid var(--border);padding:12px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+        <span><strong>${row.email}</strong></span>
+        <span class="muted">${row.plan_code} / ${row.subscription_status}</span>
+        <select data-uid="${row.id}" class="admin-plan-select" style="padding:6px;border-radius:6px;background:var(--bg2);color:var(--text);border:1px solid var(--border);">
+          ${opt('starter')}${opt('growth')}${opt('agency')}${opt('trial')}
+        </select>
+        <button type="button" class="btn btn-secondary btn-sm admin-apply" data-uid="${row.id}">Apply plan</button>
+      </div>
+    `;
+    }).join('');
+    document.querySelectorAll('.admin-apply').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.getAttribute('data-uid');
+        const sel = document.querySelector('select.admin-plan-select[data-uid="' + id + '"]');
+        const plan_code = sel.value;
+        await fetch('/api/admin/users/' + id + '/subscription', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plan_code, subscription_status: 'active' }),
+        });
+        load();
+      });
+    });
+  }
+  load();
+</script>
+{% endblock %}

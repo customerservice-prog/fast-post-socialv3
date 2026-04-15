@@ -10,29 +10,6 @@
   </head>
   <body>
 
-  <!-- Full-page notice: shown on every load until Enter / Continue (public “live” visits). -->
-  <div id="constructionOverlay" class="construction-overlay" role="dialog" aria-modal="true" aria-labelledby="constructionTitle" aria-describedby="constructionDesc">
-    <div class="construction-panel">
-      <p class="construction-badge">Under construction</p>
-      <h2 id="constructionTitle" class="construction-title">FastPost Social — coming soon</h2>
-      <p id="constructionDesc" class="construction-lead">
-        We’re finishing the experience before we open the doors to everyone. Here’s what this app is being built to do:
-      </p>
-      <ul class="construction-list">
-        <li>Turn your website into <strong>daily draft posts</strong> you can edit and approve—no blank-page stress.</li>
-        <li>Keep a clear <strong>queue</strong> for promos, tips, and community-style posts tuned to your business.</li>
-        <li>Post to <strong>Facebook / Instagram</strong> with human-reviewed captions (you stay in control).</li>
-        <li>Bring back <strong>analytics-friendly, topic-rich copy</strong> so posts sound like you—not generic filler.</li>
-      </ul>
-      <p class="construction-hint">
-        Press <kbd class="kbd">Enter</kbd> or use the button below to open the dashboard.
-      </p>
-      <button type="button" class="btn btn-primary construction-cta" id="constructionEnterBtn" autofocus>
-        Continue to site
-      </button>
-    </div>
-  </div>
-
   <!-- ===== SIDEBAR ===== -->
   <aside class="sidebar">
     <div class="sidebar-logo">
@@ -56,6 +33,11 @@
     <div class="sidebar-status">
       <div class="status-dot" id="schedulerDot"></div>
       <span id="schedulerStatus">Loading...</span>
+    </div>
+    <div class="sidebar-user">
+      <div id="sidebarUserEmail" class="muted">…</div>
+      <a href="/billing" class="btn btn-secondary btn-sm" style="text-decoration:none;display:inline-flex;">Billing</a>
+      <button type="button" class="btn btn-secondary btn-sm" id="btnLogout">Log out</button>
     </div>
   </aside>
 
@@ -128,6 +110,7 @@
 
     <!-- ========== PAGE: ACCOUNTS ========== -->
     <section id="pagAccounts" class="page">
+      <div id="accountPlanLimitBanner" class="onboarding-banner hidden" role="status" aria-live="polite"></div>
       <div class="card">
         <h2>Link a New Account</h2>
         <form id="addAccountForm" class="account-form">
@@ -198,8 +181,8 @@
         <h2>Scheduler Settings</h2>
         <div class="settings-row">
           <div>
-            <p>Auto-generates posts daily at 7:00 AM for all linked accounts.</p>
-            <p>Posts remain <strong>pending</strong> until you manually approve them.</p>
+        <p>Auto-generates posts daily at 7:00 AM for all linked accounts (per your posts/day setting).</p>
+        <p>Posts stay <strong>pending</strong> until you publish — unless you use <strong>Approve for the week</strong> on an account (then the scheduler auto-publishes that business for the current ISO week).</p>
             <p id="nextRunTime" class="muted">Next run: loading...</p>
           </div>
           <div class="settings-btns">
