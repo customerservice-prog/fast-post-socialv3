@@ -26,8 +26,8 @@ Pinned configuration in this repo (commit and redeploy from **`main`**):
 | `POST_TIMEOUT_SECONDS` | optional; default **840** (under ~15m HTTP limits on Railway). Increase only on hosts that allow longer requests. |
 | `FACEBOOK_APP_ID` | [Meta Developers](https://developers.facebook.com/) — **recommended** for automatic posting without Playwright. |
 | `FACEBOOK_APP_SECRET` | Same app (keep private). |
-| `FACEBOOK_REDIRECT_URI` | Must match **Valid OAuth Redirect URIs** exactly, e.g. `https://YOUR_DOMAIN/api/facebook/oauth/callback` |
-| `PUBLIC_APP_URL` | Optional; `https://YOUR_DOMAIN` (redirect after login). If omitted, derived from `FACEBOOK_REDIRECT_URI`. |
+| `PUBLIC_APP_URL` | **Recommended:** `https://YOUR_DOMAIN` only (no path). The app builds the OAuth callback as `PUBLIC_APP_URL` + `/api/facebook/oauth/callback`. |
+| `FACEBOOK_REDIRECT_URI` | Optional if `PUBLIC_APP_URL` is set; otherwise required. Must be `https://YOUR_DOMAIN/api/facebook/oauth/callback` and match **Valid OAuth Redirect URIs** in Meta exactly. Never a `facebook.com` URL. |
 
 3. **Volume:** mount at **`/data`** and set **`DATABASE_PATH=/data/fastpost.db`**. Without this, SQLite lives on ephemeral disk and **accounts disappear on every redeploy** (the app will log the DB path at startup).
 4. **Posting:** runs **headless** on the server — no browser window on your PC (see Settings in the app).

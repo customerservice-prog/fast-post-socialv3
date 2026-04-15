@@ -30,23 +30,39 @@ DEFAULT_SCOPES = "pages_show_list,pages_manage_posts"
 REDIRECT_PATH_SUFFIX = "/api/facebook/oauth/callback"
 
 
-def facebook_redirect_uri_valid() -> bool:
+def facebook_effective_redirect_uri() -> Optional[str]:
     """
-    OAuth redirect must land on YOUR site (FastPost), never on facebook.com.
-    Common mistake: pasting a Page or profile URL from the browser.
+    redirect_uri sent to Meta (must match Valid OAuth Redirect URIs exactly).
+    Uses FACEBOOK_REDIRECT_URI when valid; otherwise https://PUBLIC_APP_URL + callback path.
     """
-    uri = (os.getenv("FACEBOOK_REDIRECT_URI") or "").strip()
-    if not uri:
-        return False
     from urllib.parse import urlparse
 
-    p = urlparse(uri)
-    host = (p.hostname or "").lower()
-    if host == "facebook.com" or host.endswith(".facebook.com"):
-        return False
-    if not uri.rstrip("/").endswith(REDIRECT_PATH_SUFFIX):
-        return False
-    return True
+    def _ok(u: str) -> bool:
+        u = (u or "").strip().rstrip("/")
+        if not u:
+            return False
+        p = urlparse(u)
+        host = (p.hostname or "").lower()
+        if not host or host == "facebook.com" or host.endswith(".facebook.com"):
+            return False
+        return u.endswith(REDIRECT_PATH_SUFFIX)
+
+    explicit = (os.getenv("FACEBOOK_REDIRECT_URI") or "").strip()
+    if explicit and _ok(explicit):
+        return explicit.rstrip("/")
+
+    pub = (os.getenv("PUBLIC_APP_URL") or "").strip().rstrip("/")
+    if pub and "facebook.com" not in pub.lower():
+        derived = f"{pub}{REDIRECT_PATH_SUFFIX}"
+        if _ok(derived):
+            return derived.rstrip("/")
+
+    return None
+
+
+def facebook_redirect_uri_valid() -> bool:
+    """True if we can build a valid OAuth redirect (explicit or from PUBLIC_APP_URL)."""
+    return facebook_effective_redirect_uri() is not None
 
 
 def facebook_oauth_configured() -> bool:
@@ -60,33 +76,40 @@ def facebook_oauth_configured() -> bool:
 def log_facebook_oauth_env_warnings() -> None:
     """Warn if env will break Meta OAuth (https, path, host). Call once at startup."""
     uri = (os.getenv("FACEBOOK_REDIRECT_URI") or "").strip()
-    if not uri:
-        return
-    from urllib.parse import urlparse
+    if uri:
+        from urllib.parse import urlparse
 
-    p = urlparse(uri)
-    host = (p.hostname or "").lower()
-    if host == "facebook.com" or host.endswith(".facebook.com"):
-        logger.error(
-            "FACEBOOK_REDIRECT_URI must NOT be a facebook.com URL (you may have pasted a profile/Page link). "
-            "Set it to: https://YOUR_DOMAIN%s — same line in Meta Valid OAuth Redirect URIs.",
-            REDIRECT_PATH_SUFFIX,
-        )
-        return
-    is_local = host in ("localhost", "127.0.0.1", "::1")
-    if p.scheme == "http" and not is_local:
+        p = urlparse(uri)
+        host = (p.hostname or "").lower()
+        if host == "facebook.com" or host.endswith(".facebook.com"):
+            logger.error(
+                "FACEBOOK_REDIRECT_URI must NOT be a facebook.com URL (you may have pasted a profile/Page link). "
+                "Unset it and use PUBLIC_APP_URL=https://your-site or set a correct redirect. "
+                "Effective OAuth redirect will try PUBLIC_APP_URL + %s if set.",
+                REDIRECT_PATH_SUFFIX,
+            )
+        else:
+            is_local = host in ("localhost", "127.0.0.1", "::1")
+            if p.scheme == "http" and not is_local:
+                logger.warning(
+                    "FACEBOOK_REDIRECT_URI uses http:// — use https:// in production (and in Meta).",
+                )
+            normalized = uri.rstrip("/")
+            if not normalized.endswith(REDIRECT_PATH_SUFFIX):
+                logger.warning(
+                    "FACEBOOK_REDIRECT_URI should end with %s (current: %s)",
+                    REDIRECT_PATH_SUFFIX,
+                    uri[:200],
+                )
+
+    eff = facebook_effective_redirect_uri()
+    if eff and not (os.getenv("FACEBOOK_REDIRECT_URI") or "").strip():
+        logger.info("[Facebook OAuth] Using redirect URI from PUBLIC_APP_URL: %s", eff)
+    elif not eff and (os.getenv("FACEBOOK_APP_ID") or "").strip():
         logger.warning(
-            "FACEBOOK_REDIRECT_URI uses http:// — Facebook requires https:// for production. "
-            "Set FACEBOOK_REDIRECT_URI=https://%s%s (and the same URL in Meta Valid OAuth Redirect URIs).",
-            host,
-            p.path or REDIRECT_PATH_SUFFIX,
-        )
-    normalized = uri.rstrip("/")
-    if not normalized.endswith(REDIRECT_PATH_SUFFIX):
-        logger.warning(
-            "FACEBOOK_REDIRECT_URI should end with %s (current: %s)",
+            "[Facebook OAuth] No valid redirect URI: set PUBLIC_APP_URL=https://your-domain "
+            "or FACEBOOK_REDIRECT_URI=https://your-domain%s",
             REDIRECT_PATH_SUFFIX,
-            uri[:200],
         )
 
 
@@ -251,7 +274,9 @@ def complete_oauth_and_store(
     """
     Exchange code, get long-lived user token, find Page matching account page_url, save Page token.
     """
-    redirect_uri = os.environ["FACEBOOK_REDIRECT_URI"].strip()
+    redirect_uri = facebook_effective_redirect_uri()
+    if not redirect_uri:
+        return False, "OAuth redirect URI missing — set PUBLIC_APP_URL or FACEBOOK_REDIRECT_URI"
     short_tok, err = exchange_code_for_user_token(code, redirect_uri)
     if not short_tok:
         return False, err or "Token exchange failed"

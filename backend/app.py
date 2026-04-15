@@ -73,6 +73,9 @@ def _public_app_base() -> str:
 
 def _suggested_facebook_callback_url() -> str:
     """Exact redirect URI to show in errors — set this in Railway and Meta (same string)."""
+    eff = facebook_graph.facebook_effective_redirect_uri()
+    if eff:
+        return eff
     suffix = "/api/facebook/oauth/callback"
     pub = (os.getenv("PUBLIC_APP_URL") or "").strip().rstrip("/")
     if pub:
@@ -351,10 +354,8 @@ def facebook_oauth_start():
         return jsonify(
             {
                 "error": (
-                    f"FACEBOOK_REDIRECT_URI must be your app, not a facebook.com link. "
-                    f"Set Railway variable to exactly: {want} "
-                    f"(add PUBLIC_APP_URL=https://your-domain if the hint shows <your-domain>). "
-                    f"Paste the same URL in Meta → Facebook Login → Valid OAuth Redirect URIs."
+                    f"Set PUBLIC_APP_URL=https://your-domain (no trailing path) or FACEBOOK_REDIRECT_URI={want}. "
+                    f"Do not use facebook.com URLs. Add this exact redirect in Meta → Valid OAuth Redirect URIs: {want}"
                 )
             }
         ), 503
@@ -544,10 +545,10 @@ def post_now(post_id):
                 return jsonify(
                     {
                         "error": (
-                            f"Facebook Login is not ready. In Railway set FACEBOOK_REDIRECT_URI={want} "
-                            f"(not any facebook.com URL). Add the same line in Meta → Valid OAuth Redirect URIs. "
-                            f"Set PUBLIC_APP_URL to https://your-domain if needed. Redeploy, then Connect Facebook. "
-                            f"Or use Session JSON under Accounts. See DEPLOY.md."
+                            f"Facebook Login is not ready. In Railway set PUBLIC_APP_URL=https://your-domain "
+                            f"(recommended) or FACEBOOK_REDIRECT_URI={want}. Add in Meta → Valid OAuth Redirect URIs "
+                            f"exactly: {want}. Remove any facebook.com value from FACEBOOK_REDIRECT_URI. "
+                            f"Redeploy, then Connect Facebook. Or use Session JSON. See DEPLOY.md."
                         )
                     }
                 ), 400
