@@ -50,6 +50,8 @@ If Facebook shows **The domain of this URL isn’t included in the app’s domai
 5. Railway **`FACEBOOK_REDIRECT_URI`** must be **character-for-character** the same as that redirect URI (scheme `https`, correct path).
 6. Save, wait a minute, try **Connect Facebook** again (hard refresh the app).
 
+**Wrong (causes “Can’t load URL”):** putting a **Facebook profile or Page URL** in Railway, e.g. `https://www.facebook.com/profile.php?id=…` — that is **not** the OAuth callback. **Right:** `https://socialautopost.online/api/facebook/oauth/callback` (your own domain + `/api/facebook/oauth/callback`). **`FACEBOOK_APP_ID`** must match **App ID** on Meta → Basic exactly (copy-paste; watch for typos).
+
 Local dev: add **`localhost`** to App domains and **`http://127.0.0.1:5000/api/facebook/oauth/callback`** to Valid OAuth Redirect URIs; set the same value in `.env` for `FACEBOOK_REDIRECT_URI`.
 
 ### Railway copy-paste (`socialautopost.online`)
@@ -58,8 +60,8 @@ From the repo root, run **`python scripts/print_railway_facebook_vars.py`** (opt
 
 ## Smoke checks (after deploy)
 
-- `GET https://<your-host>/api/health` → JSON with `"status":"ok"`, `"posting_headless": true` on cloud, and `"facebook_oauth_configured": true` once `FACEBOOK_*` env vars are set.
-- `GET https://<your-host>/api/dashboard` → includes `"posting_headless"` and `"facebook_oauth_configured"`.
+- `GET https://<your-host>/api/health` → JSON with `"status":"ok"`, `"posting_headless": true` on cloud; `"facebook_oauth_configured": true` and `"facebook_redirect_uri_valid": true` only when **`FACEBOOK_REDIRECT_URI`** is your site’s callback (not a `facebook.com` URL).
+- `GET https://<your-host>/api/dashboard` → includes `"posting_headless"`, `"facebook_oauth_configured"`, and `"facebook_redirect_uri_valid"`.
 
 Local (from clone):
 

@@ -31,6 +31,9 @@ def main() -> None:
         assert "facebook_oauth_configured" in h
         assert isinstance(h["facebook_oauth_configured"], bool)
         assert d.get("facebook_oauth_configured") == h["facebook_oauth_configured"]
+        assert "facebook_redirect_uri_valid" in h
+        assert isinstance(h["facebook_redirect_uri_valid"], bool)
+        assert d.get("facebook_redirect_uri_valid") == h["facebook_redirect_uri_valid"]
 
     print("verify_api_posting_flags: ok")
 

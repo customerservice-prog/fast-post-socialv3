@@ -147,6 +147,7 @@ def get_accounts():
             "accounts": accounts,
             "posting_headless": bool(poster.headless),
             "facebook_oauth_configured": facebook_graph.facebook_oauth_configured(),
+            "facebook_redirect_uri_valid": facebook_graph.facebook_redirect_uri_valid(),
         }
     )
 
@@ -165,6 +166,7 @@ def get_dashboard():
             # False only on a desktop with FB_HEADED=1; cloud is always True (no window on your PC).
             "posting_headless": bool(poster.headless),
             "facebook_oauth_configured": facebook_graph.facebook_oauth_configured(),
+            "facebook_redirect_uri_valid": facebook_graph.facebook_redirect_uri_valid(),
         }
     )
 
@@ -303,12 +305,25 @@ def facebook_graph_disconnect(account_id):
 @app.route("/api/facebook/oauth/start", methods=["GET"])
 def facebook_oauth_start():
     """Redirect to Meta login; after approval, user returns to /api/facebook/oauth/callback."""
-    if not facebook_graph.facebook_oauth_configured():
+    app_id = (os.getenv("FACEBOOK_APP_ID") or "").strip()
+    secret = (os.getenv("FACEBOOK_APP_SECRET") or "").strip()
+    if not app_id or not secret:
         return jsonify(
             {
                 "error": (
-                    "Facebook Login is not configured. Set FACEBOOK_APP_ID, FACEBOOK_APP_SECRET, "
-                    "and FACEBOOK_REDIRECT_URI in Railway (see DEPLOY.md)."
+                    "Facebook Login is not configured. Set FACEBOOK_APP_ID and FACEBOOK_APP_SECRET "
+                    "in Railway (see DEPLOY.md)."
+                )
+            }
+        ), 503
+    if not facebook_graph.facebook_redirect_uri_valid():
+        return jsonify(
+            {
+                "error": (
+                    "FACEBOOK_REDIRECT_URI is wrong. It must be YOUR site, e.g. "
+                    "https://socialautopost.online/api/facebook/oauth/callback — "
+                    "not a facebook.com profile or Page URL. Put the same URL in Meta → "
+                    "Facebook Login → Valid OAuth Redirect URIs. Run: python scripts/print_railway_facebook_vars.py"
                 )
             }
         ), 503
@@ -567,6 +582,7 @@ def health():
             "version": "3.0.0",
             "posting_headless": bool(poster.headless),
             "facebook_oauth_configured": facebook_graph.facebook_oauth_configured(),
+            "facebook_redirect_uri_valid": facebook_graph.facebook_redirect_uri_valid(),
         }
     )
 

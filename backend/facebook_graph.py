@@ -27,16 +27,38 @@ FB_DIALOG = f"https://www.facebook.com/{GRAPH_VERSION}/dialog/oauth"
 DEFAULT_SCOPES = "pages_show_list,pages_manage_posts"
 
 
+REDIRECT_PATH_SUFFIX = "/api/facebook/oauth/callback"
+
+
+def facebook_redirect_uri_valid() -> bool:
+    """
+    OAuth redirect must land on YOUR site (FastPost), never on facebook.com.
+    Common mistake: pasting a Page or profile URL from the browser.
+    """
+    uri = (os.getenv("FACEBOOK_REDIRECT_URI") or "").strip()
+    if not uri:
+        return False
+    from urllib.parse import urlparse
+
+    p = urlparse(uri)
+    host = (p.hostname or "").lower()
+    if host == "facebook.com" or host.endswith(".facebook.com"):
+        return False
+    if not uri.rstrip("/").endswith(REDIRECT_PATH_SUFFIX):
+        return False
+    return True
+
+
 def facebook_oauth_configured() -> bool:
     return bool(
         os.getenv("FACEBOOK_APP_ID", "").strip()
         and os.getenv("FACEBOOK_APP_SECRET", "").strip()
-        and os.getenv("FACEBOOK_REDIRECT_URI", "").strip()
+        and facebook_redirect_uri_valid()
     )
 
 
 def log_facebook_oauth_env_warnings() -> None:
-    """Warn if env will break Meta OAuth (https, path). Call once at startup."""
+    """Warn if env will break Meta OAuth (https, path, host). Call once at startup."""
     uri = (os.getenv("FACEBOOK_REDIRECT_URI") or "").strip()
     if not uri:
         return
@@ -44,20 +66,26 @@ def log_facebook_oauth_env_warnings() -> None:
 
     p = urlparse(uri)
     host = (p.hostname or "").lower()
+    if host == "facebook.com" or host.endswith(".facebook.com"):
+        logger.error(
+            "FACEBOOK_REDIRECT_URI must NOT be a facebook.com URL (you may have pasted a profile/Page link). "
+            "Set it to: https://YOUR_DOMAIN%s — same line in Meta Valid OAuth Redirect URIs.",
+            REDIRECT_PATH_SUFFIX,
+        )
+        return
     is_local = host in ("localhost", "127.0.0.1", "::1")
     if p.scheme == "http" and not is_local:
         logger.warning(
             "FACEBOOK_REDIRECT_URI uses http:// — Facebook requires https:// for production. "
-            "Set FACEBOOK_REDIRECT_URI=https://%s%s (and the same URL in Meta → Valid OAuth Redirect URIs).",
+            "Set FACEBOOK_REDIRECT_URI=https://%s%s (and the same URL in Meta Valid OAuth Redirect URIs).",
             host,
-            p.path or "/api/facebook/oauth/callback",
+            p.path or REDIRECT_PATH_SUFFIX,
         )
-    suffix = "/api/facebook/oauth/callback"
     normalized = uri.rstrip("/")
-    if not normalized.endswith(suffix):
+    if not normalized.endswith(REDIRECT_PATH_SUFFIX):
         logger.warning(
             "FACEBOOK_REDIRECT_URI should end with %s (current: %s)",
-            suffix,
+            REDIRECT_PATH_SUFFIX,
             uri[:200],
         )
 
