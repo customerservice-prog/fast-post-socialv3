@@ -52,6 +52,10 @@ If Facebook shows **The domain of this URL isn’t included in the app’s domai
 
 Local dev: add **`localhost`** to App domains and **`http://127.0.0.1:5000/api/facebook/oauth/callback`** to Valid OAuth Redirect URIs; set the same value in `.env` for `FACEBOOK_REDIRECT_URI`.
 
+### Railway copy-paste (`socialautopost.online`)
+
+From the repo root, run **`python scripts/print_railway_facebook_vars.py`** (optional: pass your domain). It prints **`FACEBOOK_REDIRECT_URI`** and **`PUBLIC_APP_URL`** with **https** — paste those into Railway, then add the same **redirect URI** and **App domains** in Meta (see above). **Do not** use `http://` for your live domain.
+
 ## Smoke checks (after deploy)
 
 - `GET https://<your-host>/api/health` → JSON with `"status":"ok"`, `"posting_headless": true` on cloud, and `"facebook_oauth_configured": true` once `FACEBOOK_*` env vars are set.

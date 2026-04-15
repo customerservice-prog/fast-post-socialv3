@@ -35,6 +35,33 @@ def facebook_oauth_configured() -> bool:
     )
 
 
+def log_facebook_oauth_env_warnings() -> None:
+    """Warn if env will break Meta OAuth (https, path). Call once at startup."""
+    uri = (os.getenv("FACEBOOK_REDIRECT_URI") or "").strip()
+    if not uri:
+        return
+    from urllib.parse import urlparse
+
+    p = urlparse(uri)
+    host = (p.hostname or "").lower()
+    is_local = host in ("localhost", "127.0.0.1", "::1")
+    if p.scheme == "http" and not is_local:
+        logger.warning(
+            "FACEBOOK_REDIRECT_URI uses http:// — Facebook requires https:// for production. "
+            "Set FACEBOOK_REDIRECT_URI=https://%s%s (and the same URL in Meta → Valid OAuth Redirect URIs).",
+            host,
+            p.path or "/api/facebook/oauth/callback",
+        )
+    suffix = "/api/facebook/oauth/callback"
+    normalized = uri.rstrip("/")
+    if not normalized.endswith(suffix):
+        logger.warning(
+            "FACEBOOK_REDIRECT_URI should end with %s (current: %s)",
+            suffix,
+            uri[:200],
+        )
+
+
 def _norm_secret(secret) -> str:
     if isinstance(secret, (bytes, bytearray)):
         return bytes(secret).decode("utf-8", "replace")
