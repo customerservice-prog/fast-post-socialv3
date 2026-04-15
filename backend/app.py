@@ -61,8 +61,37 @@ def _public_app_base() -> str:
     redir = (os.getenv("FACEBOOK_REDIRECT_URI") or "").strip()
     if redir:
         p = urlparse(redir)
-        return f"{p.scheme}://{p.netloc}".rstrip("/")
+        host = (p.hostname or "").lower()
+        if host and "facebook.com" not in host:
+            return f"{p.scheme}://{p.netloc}".rstrip("/")
+    rdom = (os.getenv("RAILWAY_PUBLIC_DOMAIN") or "").strip()
+    if rdom and "facebook.com" not in rdom.lower():
+        rdom = rdom.split("/")[0].split(":")[0]
+        return f"https://{rdom}"
     return "http://127.0.0.1:5000"
+
+
+def _suggested_facebook_callback_url() -> str:
+    """Exact redirect URI to show in errors — set this in Railway and Meta (same string)."""
+    suffix = "/api/facebook/oauth/callback"
+    pub = (os.getenv("PUBLIC_APP_URL") or "").strip().rstrip("/")
+    if pub:
+        return f"{pub}{suffix}"
+    for key in ("RAILWAY_PUBLIC_DOMAIN",):
+        d = (os.getenv(key) or "").strip()
+        if not d or "facebook.com" in d.lower():
+            continue
+        d = d.split("/")[0].split(":")[0]
+        if d:
+            return f"https://{d}{suffix}"
+    uri = (os.getenv("FACEBOOK_REDIRECT_URI") or "").strip()
+    if uri:
+        p = urlparse(uri)
+        host = (p.hostname or "").lower()
+        if host and "facebook.com" not in host:
+            base = f"{p.scheme or 'https'}://{p.netloc}".rstrip("/")
+            return f"{base}{suffix}"
+    return f"https://<your-domain>{suffix}"
 
 
 def _post_via_facebook_graph(account: dict) -> bool:
@@ -318,13 +347,14 @@ def facebook_oauth_start():
             }
         ), 503
     if not facebook_graph.facebook_redirect_uri_valid():
+        want = _suggested_facebook_callback_url()
         return jsonify(
             {
                 "error": (
-                    "FACEBOOK_REDIRECT_URI is wrong. It must be YOUR site, e.g. "
-                    "https://socialautopost.online/api/facebook/oauth/callback — "
-                    "not a facebook.com profile or Page URL. Put the same URL in Meta → "
-                    "Facebook Login → Valid OAuth Redirect URIs. Run: python scripts/print_railway_facebook_vars.py"
+                    f"FACEBOOK_REDIRECT_URI must be your app, not a facebook.com link. "
+                    f"Set Railway variable to exactly: {want} "
+                    f"(add PUBLIC_APP_URL=https://your-domain if the hint shows <your-domain>). "
+                    f"Paste the same URL in Meta → Facebook Login → Valid OAuth Redirect URIs."
                 )
             }
         ), 503
@@ -510,13 +540,14 @@ def post_now(post_id):
             if (os.getenv("FACEBOOK_APP_ID") or "").strip() and (
                 os.getenv("FACEBOOK_APP_SECRET") or ""
             ).strip():
+                want = _suggested_facebook_callback_url()
                 return jsonify(
                     {
                         "error": (
-                            "Facebook Login is not ready: fix FACEBOOK_REDIRECT_URI to "
-                            "https://YOUR_DOMAIN/api/facebook/oauth/callback (not a facebook.com URL), "
-                            "match it in Meta Valid OAuth Redirect URIs, redeploy, then Connect Facebook. "
-                            "Or use Session JSON under Accounts. See DEPLOY.md."
+                            f"Facebook Login is not ready. In Railway set FACEBOOK_REDIRECT_URI={want} "
+                            f"(not any facebook.com URL). Add the same line in Meta → Valid OAuth Redirect URIs. "
+                            f"Set PUBLIC_APP_URL to https://your-domain if needed. Redeploy, then Connect Facebook. "
+                            f"Or use Session JSON under Accounts. See DEPLOY.md."
                         )
                     }
                 ), 400
