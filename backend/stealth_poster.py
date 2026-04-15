@@ -68,6 +68,11 @@ def _running_in_paas() -> bool:
     )
 
 
+def running_in_paas() -> bool:
+    """True on Render, Railway, Fly, etc. — used by the API layer for posting hints."""
+    return _running_in_paas()
+
+
 def _default_headless() -> bool:
     """
     Headless is required on servers without a real X11/Wayland session. Some hosts set a

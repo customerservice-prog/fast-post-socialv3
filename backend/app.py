@@ -25,6 +25,7 @@ from stealth_poster import (
     PROFILES_DIR,
     UPLOADED_STORAGE_NAME,
     profile_has_headless_session_data,
+    running_in_paas,
 )
 
 load_dotenv()
@@ -490,6 +491,52 @@ def post_now(post_id):
                 }
             )
         return jsonify({"error": err_msg or "Facebook API post failed"}), 500
+
+    # Railway/cloud: Playwright needs disk session OR use Graph API above — fail fast with the right hint.
+    plat = (account.get("platform") or "").lower()
+    prof = (PROFILES_DIR / f"profile_{account['id']}").resolve()
+    has_browser_session = profile_has_headless_session_data(prof)
+    if running_in_paas() and not has_browser_session:
+        if plat in ("facebook", "fb", "both"):
+            if facebook_graph.facebook_oauth_configured():
+                return jsonify(
+                    {
+                        "error": (
+                            "This account is not connected to Facebook yet. Open Accounts, click "
+                            "Connect Facebook, finish Meta login, then try Post now again."
+                        )
+                    }
+                ), 400
+            if (os.getenv("FACEBOOK_APP_ID") or "").strip() and (
+                os.getenv("FACEBOOK_APP_SECRET") or ""
+            ).strip():
+                return jsonify(
+                    {
+                        "error": (
+                            "Facebook Login is not ready: fix FACEBOOK_REDIRECT_URI to "
+                            "https://YOUR_DOMAIN/api/facebook/oauth/callback (not a facebook.com URL), "
+                            "match it in Meta Valid OAuth Redirect URIs, redeploy, then Connect Facebook. "
+                            "Or use Session JSON under Accounts. See DEPLOY.md."
+                        )
+                    }
+                ), 400
+            return jsonify(
+                {
+                    "error": (
+                        "On Railway, Facebook posts use Meta’s API: set FACEBOOK_APP_ID, "
+                        "FACEBOOK_APP_SECRET, and FACEBOOK_REDIRECT_URI, then Connect Facebook in Accounts. "
+                        "Alternatively use Session JSON and PROFILES_DIR on a /data volume. See DEPLOY.md."
+                    )
+                }
+            ), 400
+        return jsonify(
+            {
+                "error": (
+                    "Headless server has no browser session for this account. Use Accounts → Session JSON, "
+                    "and set PROFILES_DIR=/data/browser_profiles with a volume on /data. See DEPLOY.md."
+                )
+            }
+        ), 400
 
     # Stay below ~15m platform HTTP limits (e.g. Railway) so we return JSON 504 instead of a dropped socket.
     # Raise POST_TIMEOUT_SECONDS locally if headed login needs longer.
