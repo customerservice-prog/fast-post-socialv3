@@ -8,6 +8,7 @@ Requires a Meta app: https://developers.facebook.com/ — add FACEBOOK_* env var
 
 from __future__ import annotations
 
+import io
 import logging
 import os
 import re
@@ -433,7 +434,7 @@ def match_page_to_account(
 
 
 def post_page_feed(page_id: str, page_access_token: str, message: str) -> Tuple[bool, str]:
-    """POST /{page-id}/feed — publish text post to the Page."""
+    """POST /{page-id}/feed — publish text-only post (legacy)."""
     data, status = _post(
         f"/{page_id}/feed",
         {"message": message, "access_token": page_access_token},
@@ -442,6 +443,42 @@ def post_page_feed(page_id: str, page_access_token: str, message: str) -> Tuple[
         return True, ""
     err = data.get("error") or {}
     msg = err.get("message") or str(data)[:500]
+    return False, msg
+
+
+def post_page_photo(
+    page_id: str,
+    page_access_token: str,
+    message: str,
+    image_bytes: bytes,
+    filename: str = "fastpost-share.jpg",
+    mime: str = "image/jpeg",
+) -> Tuple[bool, str]:
+    """
+    POST /{page-id}/photos — publish photo with caption (multipart).
+    https://developers.facebook.com/docs/graph-api/reference/page/photos/
+    access_token is passed as a query param (reliable with multipart on many hosts).
+    """
+    url = f"{GRAPH_BASE}/{page_id}/photos"
+    buf = io.BytesIO(image_bytes)
+    buf.seek(0)
+    files = {
+        "source": (filename, buf, mime),
+    }
+    data = {"message": (message or "")[:63206]}  # FB message length safety
+    params = {"access_token": page_access_token, "published": "true"}
+    try:
+        r = requests.post(url, params=params, files=files, data=data, timeout=120)
+    except requests.RequestException as e:
+        return False, str(e)[:500]
+    try:
+        j = r.json()
+    except Exception:
+        return False, (r.text or "")[:500]
+    if r.status_code == 200 and j.get("id"):
+        return True, ""
+    err = j.get("error") or {}
+    msg = err.get("message") or str(j)[:500]
     return False, msg
 
 

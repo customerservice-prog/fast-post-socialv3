@@ -58,11 +58,13 @@ class PostScheduler:
         for account in accounts:
             try:
                 crawl_data = self.db.get_crawl_data(account["id"])
+                recent = self.db.get_recent_history_captions(account["id"], 30)
                 posts = self.ai_gen.generate_daily_posts(
                     business_name=account["business_name"],
                     business_url=account["business_url"],
                     platform=account["platform"],
                     crawl_data=crawl_data,
+                    recent_published_captions=recent,
                 )
                 for post in posts:
                     self.db.add_post(

@@ -11,6 +11,8 @@ import re
 from datetime import date
 from typing import List, Dict, Optional, Tuple
 
+from caption_dedup import max_similarity_vs_recent
+
 
 class AIContentGenerator:
     """Generates captions from structured crawl data using templates and light text shaping."""
@@ -22,19 +24,42 @@ class AIContentGenerator:
             "evening": "18:00",
         }
 
+    def _recent_themes_hint(self, recent_captions: List[str]) -> str:
+        """Short text so templates can vary angles vs prior publishes."""
+        if not recent_captions:
+            return ""
+        parts = []
+        for t in recent_captions[:12]:
+            s = re.sub(r"\s+", " ", (t or "").strip())[:140]
+            if s:
+                parts.append(s)
+        return " · ".join(parts)[:900]
+
+    def _variety_preamble(self, ctx: Dict) -> str:
+        h = ctx.get("recent_themes_hint") or ""
+        if not h.strip():
+            return ""
+        return (
+            "Fresh angle — steer clear of repeating the same hooks as recent posts on this Page. "
+            f"Recent themes included: {h[:420]}{'…' if len(h) > 420 else ''}\n\n"
+        )
+
     def generate_daily_posts(
         self,
         business_name: str,
         business_url: str,
         platform: str,
         crawl_data: Optional[Dict] = None,
+        recent_published_captions: Optional[List[str]] = None,
     ) -> List[Dict]:
         """
         Generate 3 posts for today: morning promo, afternoon tip, evening social proof.
-        Returns list of post dicts ready to insert into DB.
+        recent_published_captions: last ~30 published captions for this account (de-duplication).
         """
         today = date.today().strftime("%Y-%m-%d")
         ctx = self._extract_context(business_name, business_url, crawl_data)
+        recent = list(recent_published_captions or [])[:30]
+        ctx["recent_themes_hint"] = self._recent_themes_hint(recent)
         seed = date.today().toordinal() + len(business_name)
 
         posts_meta = [
@@ -46,6 +71,11 @@ class AIContentGenerator:
         posts = []
         for post_type, time_str, builder in posts_meta:
             caption, image_prompt = builder(ctx, platform, seed)
+            tries = 0
+            while tries < 5 and max_similarity_vs_recent(caption, recent) > 0.4:
+                tries += 1
+                seed += 97
+                caption, image_prompt = builder(ctx, platform, seed)
             seed += 17
             posts.append(
                 {
@@ -222,19 +252,26 @@ class AIContentGenerator:
             ],
             seed,
         )
-        parts = [
-            self._pick(opens, seed),
-            "",
-            mid,
-            "",
-            bullets_intro,
-            bullets,
-            price_block,
-            "",
-            self._pick(ctas, seed + 1),
-            "",
-            save_line,
-        ]
+        pre = self._variety_preamble(ctx)
+        parts = []
+        if pre:
+            parts.append(pre.rstrip())
+            parts.append("")
+        parts.extend(
+            [
+                self._pick(opens, seed),
+                "",
+                mid,
+                "",
+                bullets_intro,
+                bullets,
+                price_block,
+                "",
+                self._pick(ctas, seed + 1),
+                "",
+                save_line,
+            ]
+        )
         caption = "\n".join(p for p in parts if p is not None)
         caption = caption + self._facebook_semantic_footer(ctx, platform, seed)
         caption = self._append_platform_tail(caption, ctx, platform, seed)
@@ -279,8 +316,9 @@ class AIContentGenerator:
             "• Confirm contingency if weather or access changes"
         )
 
+        vp = self._variety_preamble(ctx)
         caption = (
-            f"Tip: {tip_title}\n\n{tip_body}\n\n{apply_block}{story}{checklist}\n\n"
+            f"{vp}Tip: {tip_title}\n\n{tip_body}\n\n{apply_block}{story}{checklist}\n\n"
             f"Drop a comment with your biggest question—engagement helps us prioritize what to explain next.\n\n"
             f"— {name}"
         )
@@ -315,8 +353,9 @@ class AIContentGenerator:
             "Tell us: what's one thing you'd love to check off your list this month?",
         ]
 
+        vp = self._variety_preamble(ctx)
         caption = (
-            f"{s1}\n\n{s2}\n\n{depth}\n\n"
+            f"{vp}{s1}\n\n{s2}\n\n{depth}\n\n"
             f"— {name}\n\n"
             f"{self._pick(questions, seed)}\n\n"
             f"If this resonates, share it with someone who's in planning mode. Word-of-mouth is how local businesses like ours stay healthy."

@@ -78,8 +78,58 @@ class Database:
         c = conn.cursor()
         c.executescript(_SCHEMA)
         self._migrate_accounts_facebook_graph(conn)
+        self._migrate_post_history(conn)
+        self._backfill_post_history_from_published_posts(conn)
         conn.commit()
         conn.close()
+
+    def _migrate_post_history(self, conn):
+        """Published post archive for de-duplication and analytics."""
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS post_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL,
+                post_id INTEGER,
+                post_type TEXT NOT NULL,
+                caption_text TEXT NOT NULL,
+                published_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                keywords TEXT NOT NULL,
+                FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+                FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE SET NULL
+            )
+            """
+        )
+
+    def _backfill_post_history_from_published_posts(self, conn) -> None:
+        """
+        One-time style backfill: copy rows from posts (status=published) into post_history
+        when no history row exists for that post_id. Safe to run on every startup (idempotent).
+        """
+        try:
+            from caption_dedup import extract_keywords, keywords_to_json, post_type_display
+        except ImportError:
+            return
+        rows = conn.execute(
+            """
+            SELECT p.id, p.account_id, p.post_type, p.caption, p.published_at
+            FROM posts p
+            WHERE p.status = 'published'
+            AND NOT EXISTS (
+                SELECT 1 FROM post_history h WHERE h.post_id = p.id
+            )
+            """
+        ).fetchall()
+        for r in rows:
+            cap = r["caption"] or ""
+            label = post_type_display(str(r["post_type"] or ""))
+            kw = keywords_to_json(extract_keywords(cap))
+            pub = r["published_at"]
+            conn.execute(
+                """INSERT INTO post_history (account_id, post_id, post_type, caption_text, keywords, published_at)
+                   VALUES (?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))""",
+                (r["account_id"], r["id"], label, cap, kw, pub),
+            )
 
     def _migrate_accounts_facebook_graph(self, conn):
         """Add Facebook Graph API columns for headless posting without Playwright session."""
@@ -290,6 +340,49 @@ class Database:
         )
         conn.commit()
         conn.close()
+
+    def insert_post_history(
+        self,
+        account_id: int,
+        post_id: Optional[int],
+        post_type_label: str,
+        caption_text: str,
+        keywords_json: str,
+    ) -> int:
+        """Record a successful publish (Graph or browser). keywords_json: JSON array of strings."""
+        conn = self.get_conn()
+        c = conn.cursor()
+        c.execute(
+            """INSERT INTO post_history (account_id, post_id, post_type, caption_text, keywords)
+               VALUES (?, ?, ?, ?, ?)""",
+            (account_id, post_id, post_type_label, caption_text, keywords_json),
+        )
+        hid = c.lastrowid
+        conn.commit()
+        conn.close()
+        return int(hid)
+
+    def get_recent_history_captions(self, account_id: int, limit: int = 30) -> List[str]:
+        """Last N published captions for this account (for draft de-duplication)."""
+        conn = self.get_conn()
+        rows = conn.execute(
+            """SELECT caption_text FROM post_history
+               WHERE account_id = ?
+               ORDER BY datetime(published_at) DESC, id DESC
+               LIMIT ?""",
+            (account_id, limit),
+        ).fetchall()
+        conn.close()
+        return [str(r["caption_text"]) for r in rows if r["caption_text"]]
+
+    def get_post_history_counts(self) -> Dict[int, int]:
+        """account_id -> number of rows in post_history."""
+        conn = self.get_conn()
+        rows = conn.execute(
+            "SELECT account_id, COUNT(*) AS c FROM post_history GROUP BY account_id"
+        ).fetchall()
+        conn.close()
+        return {int(r["account_id"]): int(r["c"]) for r in rows}
 
     def delete_post(self, post_id: int):
         conn = self.get_conn()

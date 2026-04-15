@@ -23,3 +23,6 @@ pytz==2024.1
 
 # Utilities
 certifi==2024.6.2
+
+# Share images (Facebook 1200x630)
+Pillow>=10.4.0

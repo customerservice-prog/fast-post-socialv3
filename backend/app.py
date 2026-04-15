@@ -21,6 +21,8 @@ from crawler import BusinessCrawler
 from ai_generator import AIContentGenerator
 from scheduler import PostScheduler
 import facebook_graph
+import caption_dedup
+import post_image
 from stealth_poster import (
     StealthPoster,
     PROFILES_DIR,
@@ -136,7 +138,20 @@ def _post_via_facebook_graph(account: dict) -> bool:
     return bool(account.get("fb_page_id") and account.get("fb_page_access_token"))
 
 
-def _account_for_api(raw: dict) -> dict:
+def _record_successful_publish(account_id: int, post_id: int, caption: str, post_type_internal: str) -> None:
+    """Archive publish for de-duplication + badge counts."""
+    label = caption_dedup.post_type_display(post_type_internal or "")
+    kw = caption_dedup.extract_keywords(caption or "")
+    db.insert_post_history(
+        account_id,
+        post_id,
+        label,
+        caption or "",
+        caption_dedup.keywords_to_json(kw),
+    )
+
+
+def _account_for_api(raw: dict, posts_sent: int = 0) -> dict:
     """API-safe account view (no huge crawl blob)."""
     keys = (
         "id",
@@ -176,6 +191,7 @@ def _account_for_api(raw: dict) -> dict:
         and profile_has_headless_session_data(PROFILES_DIR / f"profile_{iid}")
     )
     out["fb_graph_connected"] = bool(raw.get("fb_page_access_token"))
+    out["posts_sent_count"] = int(posts_sent)
     return out
 
 
@@ -206,7 +222,8 @@ def frontend_static(filename):
 @app.route("/api/accounts", methods=["GET"])
 def get_accounts():
     """Return all linked social media accounts"""
-    accounts = [_account_for_api(dict(a)) for a in db.get_all_accounts()]
+    hist = db.get_post_history_counts()
+    accounts = [_account_for_api(dict(a), hist.get(int(a["id"]), 0)) for a in db.get_all_accounts()]
     return jsonify(
         {
             "accounts": accounts,
@@ -221,13 +238,16 @@ def get_accounts():
 def get_dashboard():
     """Single payload for the Daily Queue UX: drafts, history, stats, account chips."""
     today = date.today().strftime("%Y-%m-%d")
+    hist_counts = db.get_post_history_counts()
     return jsonify(
         {
             "pending_today": db.get_todays_queue(),
             "pending_other_days": db.get_pending_other_days(today, limit=20),
             "published_today_count": db.count_published_today(),
             "recent_published": db.get_recent_published_all(15),
-            "accounts": [_account_for_api(dict(a)) for a in db.get_all_accounts()],
+            "accounts": [
+                _account_for_api(dict(a), hist_counts.get(int(a["id"]), 0)) for a in db.get_all_accounts()
+            ],
             # False only on a desktop with FB_HEADED=1; cloud is always True (no window on your PC).
             "posting_headless": bool(poster.headless),
             "facebook_oauth_configured": facebook_graph.facebook_oauth_configured(),
@@ -479,11 +499,13 @@ def generate_posts():
         if not account:
             continue
         crawl_data = db.get_crawl_data(account["id"])
+        recent = db.get_recent_history_captions(account["id"], 30)
         posts = ai_gen.generate_daily_posts(
             business_name=account["business_name"],
             business_url=account["business_url"],
             platform=account["platform"],
             crawl_data=crawl_data,
+            recent_published_captions=recent,
         )
         for post in posts:
             post_id = db.add_post(
@@ -552,12 +574,29 @@ def post_now(post_id):
 
     # Facebook Graph API: no Playwright — user clicked "Connect Facebook" once (OAuth).
     if _post_via_facebook_graph(account):
-        ok, err_msg = facebook_graph.post_page_feed(
+        img_bytes = post_image.render_share_image_jpeg(
+            account.get("business_name") or "",
+            post.get("caption") or "",
+            post.get("post_type") or "",
+        )
+        ok, err_msg = facebook_graph.post_page_photo(
             str(account["fb_page_id"]),
             account["fb_page_access_token"],
             post["caption"],
+            img_bytes,
         )
+        if not ok:
+            logger.warning(
+                "Facebook photo post failed (%s); retrying as text-only feed post",
+                err_msg[:300],
+            )
+            ok, err_msg = facebook_graph.post_page_feed(
+                str(account["fb_page_id"]),
+                account["fb_page_access_token"],
+                post["caption"],
+            )
         if ok:
+            _record_successful_publish(account["id"], post_id, post["caption"], post.get("post_type") or "")
             db.mark_post_published(post_id)
             return jsonify(
                 {
@@ -656,6 +695,7 @@ def post_now(post_id):
         return jsonify({"error": str(e) or "Posting failed unexpectedly"}), 500
 
     if result["success"]:
+        _record_successful_publish(account["id"], post_id, post["caption"], post.get("post_type") or "")
         db.mark_post_published(post_id)
         return jsonify(
             {

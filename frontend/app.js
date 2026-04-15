@@ -551,6 +551,7 @@ function renderAccounts(accs) {
         <div class="account-meta-row">
           <span class="status-pill ${acc.crawl_ready ? 'status-pill--ok' : 'status-pill--warn'}">${escHtml(acc.status_label || '')}</span>
           ${cloudPostingStatusPill(acc)}
+          <span class="meta-text posts-sent-badge" title="Successful publishes tracked in history">${Number(acc.posts_sent_count) || 0} posts sent</span>
           ${acc.crawl_pages != null ? `<span class="meta-text">${acc.crawl_pages} page(s) indexed</span>` : ''}
           ${acc.updated_at ? `<span class="meta-text">Updated ${escHtml(formatDateTime(acc.updated_at))}</span>` : ''}
         </div>
