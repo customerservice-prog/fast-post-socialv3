@@ -34,6 +34,24 @@ Pinned configuration in this repo (commit and redeploy from **`main`**):
 5. **Facebook (recommended):** add a Meta app with **Facebook Login**; set the `FACEBOOK_*` variables and the redirect URI above. In the app: **Accounts → Connect Facebook** once per account, then **Post now** uses the **Graph API** (no JSON files, no Chromium for Facebook). Until the app is **Live**, add your Facebook user under the app’s **Roles** so you can authorize.
 6. **Fallback:** **Accounts → Session JSON** (Playwright storage) still works for Instagram-only or if you skip the Meta app. Keep **`PROFILES_DIR` on `/data`** if you use it.
 
+### Meta app: “Can’t load URL” / App Domains
+
+If Facebook shows **The domain of this URL isn’t included in the app’s domains**:
+
+1. **[developers.facebook.com](https://developers.facebook.com/)** → your app → **App settings → Basic**
+2. **App domains** — add only the hostname, no `https://`, no path:  
+   `socialautopost.online`  
+   (Use your real Railway/custom domain. For `www`, either add `www.socialautopost.online` as a second domain or use one canonical URL everywhere.)
+3. **Add platform → Website** (if missing): **Site URL** = `https://socialautopost.online/` (trailing slash is fine).
+4. **Use cases → Authentication and account creation → Facebook Login** → **Settings** (or **Facebook Login → Settings** in the left nav):
+   - **Valid OAuth Redirect URIs** must include exactly:  
+     `https://socialautopost.online/api/facebook/oauth/callback`
+   - Turn **Client OAuth login** and **Web OAuth login** **On** if you see those toggles.
+5. Railway **`FACEBOOK_REDIRECT_URI`** must be **character-for-character** the same as that redirect URI (scheme `https`, correct path).
+6. Save, wait a minute, try **Connect Facebook** again (hard refresh the app).
+
+Local dev: add **`localhost`** to App domains and **`http://127.0.0.1:5000/api/facebook/oauth/callback`** to Valid OAuth Redirect URIs; set the same value in `.env` for `FACEBOOK_REDIRECT_URI`.
+
 ## Smoke checks (after deploy)
 
 - `GET https://<your-host>/api/health` → JSON with `"status":"ok"`, `"posting_headless": true` on cloud, and `"facebook_oauth_configured": true` once `FACEBOOK_*` env vars are set.
