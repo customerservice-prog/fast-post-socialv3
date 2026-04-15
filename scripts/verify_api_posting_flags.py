@@ -28,6 +28,9 @@ def main() -> None:
         assert r2.status_code == 200
         h = r2.get_json()
         assert h.get("posting_headless") is d["posting_headless"]
+        assert "facebook_oauth_configured" in h
+        assert isinstance(h["facebook_oauth_configured"], bool)
+        assert d.get("facebook_oauth_configured") == h["facebook_oauth_configured"]
 
     print("verify_api_posting_flags: ok")
 

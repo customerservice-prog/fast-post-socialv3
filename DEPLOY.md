@@ -24,15 +24,20 @@ Pinned configuration in this repo (commit and redeploy from **`main`**):
 | `DATABASE_PATH` | `/data/fastpost.db` (with volume) |
 | `PROFILES_DIR` | `/data/browser_profiles` (with volume) |
 | `POST_TIMEOUT_SECONDS` | optional; default **840** (under ~15m HTTP limits on Railway). Increase only on hosts that allow longer requests. |
+| `FACEBOOK_APP_ID` | [Meta Developers](https://developers.facebook.com/) — **recommended** for automatic posting without Playwright. |
+| `FACEBOOK_APP_SECRET` | Same app (keep private). |
+| `FACEBOOK_REDIRECT_URI` | Must match **Valid OAuth Redirect URIs** exactly, e.g. `https://YOUR_DOMAIN/api/facebook/oauth/callback` |
+| `PUBLIC_APP_URL` | Optional; `https://YOUR_DOMAIN` (redirect after login). If omitted, derived from `FACEBOOK_REDIRECT_URI`. |
 
 3. **Volume:** mount at **`/data`** and set **`DATABASE_PATH=/data/fastpost.db`**. Without this, SQLite lives on ephemeral disk and **accounts disappear on every redeploy** (the app will log the DB path at startup).
 4. **Posting:** runs **headless** on the server — no browser window on your PC (see Settings in the app).
-5. **Facebook session:** the server cannot complete Meta login interactively. Run `python scripts/export_facebook_storage.py` **on your PC** (headed browser), log in to Facebook, then in the app go to **Accounts → Session JSON** and paste the saved file contents. That writes `uploaded_storage.json` under `PROFILES_DIR/profile_<id>/` (keep **`PROFILES_DIR` on the same `/data` volume** so sessions survive redeploys).
+5. **Facebook (recommended):** add a Meta app with **Facebook Login**; set the `FACEBOOK_*` variables and the redirect URI above. In the app: **Accounts → Connect Facebook** once per account, then **Post now** uses the **Graph API** (no JSON files, no Chromium for Facebook). Until the app is **Live**, add your Facebook user under the app’s **Roles** so you can authorize.
+6. **Fallback:** **Accounts → Session JSON** (Playwright storage) still works for Instagram-only or if you skip the Meta app. Keep **`PROFILES_DIR` on `/data`** if you use it.
 
 ## Smoke checks (after deploy)
 
-- `GET https://<your-host>/api/health` → JSON with `"status":"ok"` and `"posting_headless": true` on cloud.
-- `GET https://<your-host>/api/dashboard` → includes `"posting_headless"`.
+- `GET https://<your-host>/api/health` → JSON with `"status":"ok"`, `"posting_headless": true` on cloud, and `"facebook_oauth_configured": true` once `FACEBOOK_*` env vars are set.
+- `GET https://<your-host>/api/dashboard` → includes `"posting_headless"` and `"facebook_oauth_configured"`.
 
 Local (from clone):
 

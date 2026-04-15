@@ -77,8 +77,21 @@ class Database:
         conn = self.get_conn()
         c = conn.cursor()
         c.executescript(_SCHEMA)
+        self._migrate_accounts_facebook_graph(conn)
         conn.commit()
         conn.close()
+
+    def _migrate_accounts_facebook_graph(self, conn):
+        """Add Facebook Graph API columns for headless posting without Playwright session."""
+        rows = conn.execute("PRAGMA table_info(accounts)").fetchall()
+        cols = {r[1] for r in rows}
+        for col, ddl in (
+            ("fb_page_id", "ALTER TABLE accounts ADD COLUMN fb_page_id TEXT"),
+            ("fb_page_access_token", "ALTER TABLE accounts ADD COLUMN fb_page_access_token TEXT"),
+            ("fb_token_expires_at", "ALTER TABLE accounts ADD COLUMN fb_token_expires_at INTEGER"),
+        ):
+            if col not in cols:
+                conn.execute(ddl)
 
     # ── ACCOUNTS ─────────────────────────────────────────────────────────────
 
@@ -151,6 +164,33 @@ class Database:
         row = conn.execute("SELECT session_data FROM accounts WHERE id = ?", (account_id,)).fetchone()
         conn.close()
         return row["session_data"] if row else None
+
+    def update_facebook_graph_token(
+        self,
+        account_id: int,
+        page_id: str,
+        page_access_token: str,
+        expires_at: Optional[int] = None,
+    ):
+        """Store Page id + token from Facebook Login (Graph API). expires_at: Unix seconds or None."""
+        conn = self.get_conn()
+        conn.execute(
+            """UPDATE accounts SET fb_page_id = ?, fb_page_access_token = ?, fb_token_expires_at = ?,
+                   updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
+            (page_id, page_access_token, expires_at, account_id),
+        )
+        conn.commit()
+        conn.close()
+
+    def clear_facebook_graph_token(self, account_id: int):
+        conn = self.get_conn()
+        conn.execute(
+            """UPDATE accounts SET fb_page_id = NULL, fb_page_access_token = NULL, fb_token_expires_at = NULL,
+                   updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
+            (account_id,),
+        )
+        conn.commit()
+        conn.close()
 
     # ── POSTS ─────────────────────────────────────────────────────────────────
 

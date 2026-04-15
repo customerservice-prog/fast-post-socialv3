@@ -19,9 +19,12 @@ let accounts = [];
 let postingHeadless = true;
 /** Account id for the Playwright session paste modal. */
 let sessionModalAccountId = null;
+/** Meta app configured on server — enables Connect Facebook (Graph API). */
+let facebookOAuthConfigured = false;
 
 document.addEventListener('DOMContentLoaded', () => {
   initConstructionOverlay();
+  initFacebookOAuthLandingParams();
 
   document.getElementById('todayDate').textContent = new Date().toLocaleDateString('en-US', {
     weekday: 'long', month: 'long', day: 'numeric',
@@ -60,6 +63,61 @@ document.addEventListener('DOMContentLoaded', () => {
   loadDashboard();
   checkScheduler();
 });
+
+function initFacebookOAuthLandingParams() {
+  const q = new URLSearchParams(window.location.search);
+  if (q.get('fb_connected') === '1') {
+    showToast(
+      'Facebook connected. Post now uses the official API — no session JSON needed for this Page.',
+      'success',
+    );
+    history.replaceState({}, '', window.location.pathname + window.location.hash);
+    navigateTo('accounts');
+  }
+  const fe = q.get('fb_error');
+  if (fe) {
+    showToast(decodeURIComponent(fe), 'error');
+    history.replaceState({}, '', window.location.pathname + window.location.hash);
+  }
+}
+
+function isFacebookishPlatform(platform) {
+  const x = String(platform || '').toLowerCase();
+  return x === 'facebook' || x === 'fb' || x === 'both';
+}
+
+function cloudPostingStatusPill(acc) {
+  if (!postingHeadless) return '';
+  if (isFacebookishPlatform(acc.platform)) {
+    if (acc.fb_graph_connected) {
+      return '<span class="status-pill status-pill--ok">Ready (Facebook API)</span>';
+    }
+    if (facebookOAuthConfigured) {
+      return '<span class="status-pill status-pill--warn">→ Connect Facebook</span>';
+    }
+    return '<span class="status-pill status-pill--warn">Set Facebook app env (DEPLOY.md)</span>';
+  }
+  if (acc.has_playwright_session) {
+    return '<span class="status-pill status-pill--ok">Browser session saved</span>';
+  }
+  return '<span class="status-pill status-pill--warn">Paste session JSON (browser)</span>';
+}
+
+function connectFacebook(accountId) {
+  window.location.href = `${API}/facebook/oauth/start?account_id=${accountId}`;
+}
+
+async function disconnectFacebook(accountId) {
+  if (!confirm('Disconnect Facebook? Post now will stop using the API until you connect again.')) return;
+  try {
+    await apiFetch(`/accounts/${accountId}/facebook/disconnect`, { method: 'POST' });
+    showToast('Facebook disconnected', 'info');
+    await loadAccounts();
+    loadDashboard();
+  } catch (e) {
+    showToast(e.message || 'Disconnect failed', 'error');
+  }
+}
 
 /** Avoid inline onclick + caption escaping breaking sibling buttons; read id from the card. */
 function onQueueCardClick(ev) {
@@ -143,6 +201,9 @@ async function loadDashboard() {
     const data = await apiFetch('/dashboard');
     accounts = data.accounts || [];
     postingHeadless = data.posting_headless !== false;
+    if (typeof data.facebook_oauth_configured === 'boolean') {
+      facebookOAuthConfigured = data.facebook_oauth_configured;
+    }
     document.getElementById('statAccounts').textContent = accounts.length;
     document.getElementById('statPending').textContent = (data.pending_today || []).length;
     document.getElementById('statPublished').textContent = data.published_today_count ?? 0;
@@ -411,6 +472,9 @@ async function loadAccounts() {
     const data = await apiFetch('/accounts');
     accounts = data.accounts || [];
     if (typeof data.posting_headless === 'boolean') postingHeadless = data.posting_headless;
+    if (typeof data.facebook_oauth_configured === 'boolean') {
+      facebookOAuthConfigured = data.facebook_oauth_configured;
+    }
     renderAccounts(accounts);
     document.getElementById('statAccounts').textContent = accounts.length;
   } catch (e) {
@@ -441,7 +505,7 @@ function renderAccounts(accs) {
         </p>
         <div class="account-meta-row">
           <span class="status-pill ${acc.crawl_ready ? 'status-pill--ok' : 'status-pill--warn'}">${escHtml(acc.status_label || '')}</span>
-          ${postingHeadless ? `<span class="status-pill ${acc.has_playwright_session ? 'status-pill--ok' : 'status-pill--warn'}">${acc.has_playwright_session ? 'Server session saved' : 'Cloud: add session JSON'}</span>` : ''}
+          ${cloudPostingStatusPill(acc)}
           ${acc.crawl_pages != null ? `<span class="meta-text">${acc.crawl_pages} page(s) indexed</span>` : ''}
           ${acc.updated_at ? `<span class="meta-text">Updated ${escHtml(formatDateTime(acc.updated_at))}</span>` : ''}
         </div>
@@ -449,7 +513,9 @@ function renderAccounts(accs) {
         <p class="next-step-hint">${escHtml(acc.next_step_hint || '')}</p>
       </div>
       <div class="account-actions">
-        <button type="button" class="btn btn-secondary" onclick="openPlaywrightSessionModal(${acc.id})" title="Paste Playwright storage JSON for headless posting">Session JSON…</button>
+        ${facebookOAuthConfigured && isFacebookishPlatform(acc.platform) && !acc.fb_graph_connected ? `<button type="button" class="btn btn-primary" onclick="connectFacebook(${acc.id})" title="Official Facebook Login — no JSON files">Connect Facebook</button>` : ''}
+        ${acc.fb_graph_connected ? `<button type="button" class="btn btn-secondary" onclick="disconnectFacebook(${acc.id})">Disconnect Facebook</button>` : ''}
+        <button type="button" class="btn btn-secondary" onclick="openPlaywrightSessionModal(${acc.id})" title="Advanced: Playwright storage (Instagram or fallback)">Session JSON…</button>
         <button type="button" class="btn btn-secondary" onclick="clearPlaywrightSession(${acc.id})">Clear session</button>
         <button type="button" class="btn btn-secondary" onclick="recrawl(${acc.id})">Re-crawl</button>
         <button type="button" class="btn btn-danger" onclick="deleteAccount(${acc.id})">Remove</button>

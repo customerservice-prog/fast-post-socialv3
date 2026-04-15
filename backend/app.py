@@ -9,13 +9,17 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from datetime import date
 from pathlib import Path
-from flask import Flask, request, jsonify, send_from_directory, abort
+from urllib.parse import quote, urlparse
+
+from flask import Flask, request, jsonify, send_from_directory, abort, redirect
+from itsdangerous import BadSignature, SignatureExpired
 from flask_cors import CORS
 from dotenv import load_dotenv
 from database import Database
 from crawler import BusinessCrawler
 from ai_generator import AIContentGenerator
 from scheduler import PostScheduler
+import facebook_graph
 from stealth_poster import (
     StealthPoster,
     PROFILES_DIR,
@@ -45,6 +49,25 @@ poster = StealthPoster(db=db)
 _post_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="fastpost_post")
 
 FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
+
+
+def _public_app_base() -> str:
+    """Where the SPA lives — OAuth redirect target. Override with PUBLIC_APP_URL."""
+    base = (os.getenv("PUBLIC_APP_URL") or "").strip().rstrip("/")
+    if base:
+        return base
+    redir = (os.getenv("FACEBOOK_REDIRECT_URI") or "").strip()
+    if redir:
+        p = urlparse(redir)
+        return f"{p.scheme}://{p.netloc}".rstrip("/")
+    return "http://127.0.0.1:5000"
+
+
+def _post_via_facebook_graph(account: dict) -> bool:
+    plat = (account.get("platform") or "").lower()
+    if plat not in ("facebook", "fb", "both"):
+        return False
+    return bool(account.get("fb_page_id") and account.get("fb_page_access_token"))
 
 
 def _account_for_api(raw: dict) -> dict:
@@ -86,6 +109,7 @@ def _account_for_api(raw: dict) -> dict:
         iid is not None
         and profile_has_headless_session_data(PROFILES_DIR / f"profile_{iid}")
     )
+    out["fb_graph_connected"] = bool(raw.get("fb_page_access_token"))
     return out
 
 
@@ -117,7 +141,13 @@ def frontend_static(filename):
 def get_accounts():
     """Return all linked social media accounts"""
     accounts = [_account_for_api(dict(a)) for a in db.get_all_accounts()]
-    return jsonify({"accounts": accounts, "posting_headless": bool(poster.headless)})
+    return jsonify(
+        {
+            "accounts": accounts,
+            "posting_headless": bool(poster.headless),
+            "facebook_oauth_configured": facebook_graph.facebook_oauth_configured(),
+        }
+    )
 
 
 @app.route("/api/dashboard", methods=["GET"])
@@ -133,6 +163,7 @@ def get_dashboard():
             "accounts": [_account_for_api(dict(a)) for a in db.get_all_accounts()],
             # False only on a desktop with FB_HEADED=1; cloud is always True (no window on your PC).
             "posting_headless": bool(poster.headless),
+            "facebook_oauth_configured": facebook_graph.facebook_oauth_configured(),
         }
     )
 
@@ -259,6 +290,60 @@ def playwright_storage_clear(account_id):
     return jsonify({"message": "Session cleared", "has_session": False})
 
 
+@app.route("/api/accounts/<int:account_id>/facebook/disconnect", methods=["POST"])
+def facebook_graph_disconnect(account_id):
+    """Clear Facebook Graph API tokens (use Connect again to re-authorize)."""
+    if not db.get_account(account_id):
+        return jsonify({"error": "Account not found"}), 404
+    db.clear_facebook_graph_token(account_id)
+    return jsonify({"message": "Facebook disconnected", "fb_graph_connected": False})
+
+
+@app.route("/api/facebook/oauth/start", methods=["GET"])
+def facebook_oauth_start():
+    """Redirect to Meta login; after approval, user returns to /api/facebook/oauth/callback."""
+    if not facebook_graph.facebook_oauth_configured():
+        return jsonify(
+            {
+                "error": (
+                    "Facebook Login is not configured. Set FACEBOOK_APP_ID, FACEBOOK_APP_SECRET, "
+                    "and FACEBOOK_REDIRECT_URI in Railway (see DEPLOY.md)."
+                )
+            }
+        ), 503
+    account_id = request.args.get("account_id", type=int)
+    if not account_id:
+        return jsonify({"error": "account_id query parameter is required"}), 400
+    if not db.get_account(account_id):
+        return jsonify({"error": "Account not found"}), 404
+    url = facebook_graph.oauth_authorize_url(account_id, app.secret_key)
+    return redirect(url)
+
+
+@app.route("/api/facebook/oauth/callback", methods=["GET"])
+def facebook_oauth_callback():
+    """Meta redirects here with ?code=&state= — exchange token and store Page access token."""
+    err = request.args.get("error_description") or request.args.get("error")
+    if err:
+        return redirect(f"{_public_app_base()}/?fb_error={quote(err[:500])}")
+    code = request.args.get("code")
+    state = request.args.get("state")
+    if not code or not state:
+        return redirect(f"{_public_app_base()}/?fb_error={quote('Missing authorization code')}")
+    try:
+        aid = facebook_graph.parse_oauth_state(state, app.secret_key)
+    except SignatureExpired:
+        return redirect(
+            f"{_public_app_base()}/?fb_error={quote('Session expired — open Accounts and click Connect Facebook again')}"
+        )
+    except BadSignature:
+        return redirect(f"{_public_app_base()}/?fb_error={quote('Invalid OAuth state')}")
+    ok, msg = facebook_graph.complete_oauth_and_store(db, aid, code)
+    if ok:
+        return redirect(f"{_public_app_base()}/?fb_connected=1")
+    return redirect(f"{_public_app_base()}/?fb_error={quote(msg or 'Facebook connection failed')}")
+
+
 # ─── CRAWL ROUTES ────────────────────────────────────────────────────────────
 
 
@@ -371,6 +456,25 @@ def post_now(post_id):
     if not account:
         return jsonify({"error": "Account not found"}), 404
 
+    # Facebook Graph API: no Playwright — user clicked "Connect Facebook" once (OAuth).
+    if _post_via_facebook_graph(account):
+        ok, err_msg = facebook_graph.post_page_feed(
+            str(account["fb_page_id"]),
+            account["fb_page_access_token"],
+            post["caption"],
+        )
+        if ok:
+            db.mark_post_published(post_id)
+            return jsonify(
+                {
+                    "message": "Posted successfully",
+                    "post_id": post_id,
+                    "posting_headless": bool(poster.headless),
+                    "method": "facebook_graph",
+                }
+            )
+        return jsonify({"error": err_msg or "Facebook API post failed"}), 500
+
     # Stay below ~15m platform HTTP limits (e.g. Railway) so we return JSON 504 instead of a dropped socket.
     # Raise POST_TIMEOUT_SECONDS locally if headed login needs longer.
     timeout_s = int(os.getenv("POST_TIMEOUT_SECONDS", "840"))
@@ -461,6 +565,7 @@ def health():
             "status": "ok",
             "version": "3.0.0",
             "posting_headless": bool(poster.headless),
+            "facebook_oauth_configured": facebook_graph.facebook_oauth_configured(),
         }
     )
 

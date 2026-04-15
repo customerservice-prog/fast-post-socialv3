@@ -214,9 +214,8 @@
           That is normal: there is no screen attached in the cloud.
         </p>
         <p class="muted">
-          Use <strong>Post now</strong> and wait for the success or error toast. Confirm the post on Facebook.
-          For Railway, use <strong>Accounts → Session JSON</strong>: run <code>scripts/export_facebook_storage.py</code> on your PC,
-          then paste the saved JSON. Keep <code>PROFILES_DIR</code> on a persistent volume so the file survives deploys.
+          <strong>Best on Railway:</strong> set the Facebook app variables in DEPLOY.md, then <strong>Accounts → Connect Facebook</strong> once.
+          After that, <strong>Post now</strong> uses Meta’s API — no session files. Session JSON remains an advanced fallback (e.g. Instagram).
         </p>
       </div>
       <div class="card">
