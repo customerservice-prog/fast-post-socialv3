@@ -21,6 +21,8 @@ let postingHeadless = true;
 let sessionModalAccountId = null;
 /** Meta app configured on server — enables Connect Facebook (Graph API). */
 let facebookOAuthConfigured = false;
+/** Callback URL this site uses for Facebook (copy into Meta → Valid OAuth Redirect URIs). */
+let facebookOauthRedirectUri = '';
 
 document.addEventListener('DOMContentLoaded', () => {
   initConstructionOverlay();
@@ -84,6 +86,42 @@ function initFacebookOAuthLandingParams() {
 function isFacebookishPlatform(platform) {
   const x = String(platform || '').toLowerCase();
   return x === 'facebook' || x === 'fb' || x === 'both';
+}
+
+function syncFacebookOAuthFromPayload(data) {
+  if (typeof data.facebook_oauth_configured === 'boolean') {
+    facebookOAuthConfigured = data.facebook_oauth_configured;
+  }
+  if (typeof data.facebook_oauth_redirect_uri === 'string') {
+    facebookOauthRedirectUri = data.facebook_oauth_redirect_uri;
+  }
+  renderFacebookConnectHint();
+}
+
+function renderFacebookConnectHint() {
+  const el = document.getElementById('facebookConnectHint');
+  if (!el) return;
+  const show = facebookOAuthConfigured && facebookOauthRedirectUri;
+  if (!show) {
+    el.classList.add('hidden');
+    el.innerHTML = '';
+    return;
+  }
+  el.classList.remove('hidden');
+  el.innerHTML = `
+    <h2>Facebook — one-time Meta setup</h2>
+    <p class="muted">In <a href="https://developers.facebook.com/apps/" target="_blank" rel="noopener">Meta for Developers</a> → your app → Facebook Login → Settings: add this under <strong>Valid OAuth Redirect URIs</strong> (exact copy):</p>
+    <code class="callback-url" id="fbCallbackUrlDisplay">${escHtml(facebookOauthRedirectUri)}</code>
+    <div class="hint-actions">
+      <button type="button" class="btn btn-secondary" id="btnCopyFbCallback">Copy URL</button>
+    </div>
+  `;
+  el.querySelector('#btnCopyFbCallback')?.addEventListener('click', () => {
+    navigator.clipboard?.writeText(facebookOauthRedirectUri).then(
+      () => showToast('Copied — paste into Meta', 'success'),
+      () => showToast('Copy failed — select the URL above', 'error'),
+    );
+  });
 }
 
 function cloudPostingStatusPill(acc) {
@@ -201,9 +239,7 @@ async function loadDashboard() {
     const data = await apiFetch('/dashboard');
     accounts = data.accounts || [];
     postingHeadless = data.posting_headless !== false;
-    if (typeof data.facebook_oauth_configured === 'boolean') {
-      facebookOAuthConfigured = data.facebook_oauth_configured;
-    }
+    syncFacebookOAuthFromPayload(data);
     document.getElementById('statAccounts').textContent = accounts.length;
     document.getElementById('statPending').textContent = (data.pending_today || []).length;
     document.getElementById('statPublished').textContent = data.published_today_count ?? 0;
@@ -303,11 +339,22 @@ function renderPostCards(posts, opts) {
 
 function postCardHtml(post) {
   const pub = post.status === 'published';
+  const acc = accounts.find((a) => Number(a.id) === Number(post.account_id));
+  const blockFbPost =
+    postingHeadless &&
+    acc &&
+    isFacebookishPlatform(acc.platform) &&
+    facebookOAuthConfigured &&
+    !acc.fb_graph_connected &&
+    !acc.has_playwright_session;
+  const postBtn = blockFbPost
+    ? `<button type="button" class="btn btn-success" disabled title="Use Accounts → Connect Facebook first (or paste Session JSON)">Post now</button>`
+    : `<button type="button" class="btn btn-success" data-action="post">Post now</button>`;
   const footer = pub
     ? '<button type="button" class="btn btn-secondary" disabled>Published</button>'
     : `<button type="button" class="btn btn-secondary" data-action="edit">Edit</button>
           <button type="button" class="btn btn-danger btn-sm" data-action="delete">Delete</button>
-          <button type="button" class="btn btn-success" data-action="post">Post now</button>`;
+          ${postBtn}`;
   return `
     <div class="post-card ${pub ? 'published' : ''}" data-id="${post.id}">
       <div class="post-card-header">
@@ -472,9 +519,7 @@ async function loadAccounts() {
     const data = await apiFetch('/accounts');
     accounts = data.accounts || [];
     if (typeof data.posting_headless === 'boolean') postingHeadless = data.posting_headless;
-    if (typeof data.facebook_oauth_configured === 'boolean') {
-      facebookOAuthConfigured = data.facebook_oauth_configured;
-    }
+    syncFacebookOAuthFromPayload(data);
     renderAccounts(accounts);
     document.getElementById('statAccounts').textContent = accounts.length;
   } catch (e) {

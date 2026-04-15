@@ -9,6 +9,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from datetime import date
 from pathlib import Path
+from typing import Optional
 from urllib.parse import quote, urlparse
 
 from flask import Flask, request, jsonify, send_from_directory, abort, redirect
@@ -71,8 +72,39 @@ def _public_app_base() -> str:
     return "http://127.0.0.1:5000"
 
 
+def _forwarded_scheme_host():
+    """Scheme and host as seen by the client (Railway sets X-Forwarded-*)."""
+    proto = request.headers.get("X-Forwarded-Proto") or request.scheme or "https"
+    if "," in proto:
+        proto = proto.split(",", 1)[0].strip()
+    host = request.headers.get("X-Forwarded-Host") or request.host or ""
+    if "," in host:
+        host = host.split(",", 1)[0].strip()
+    return proto, host
+
+
+def _facebook_redirect_for_request() -> Optional[str]:
+    sch, host = _forwarded_scheme_host()
+    return facebook_graph.facebook_effective_redirect_uri(
+        forwarded_scheme=sch,
+        forwarded_host=host,
+    )
+
+
+def _facebook_api_extras():
+    """Dashboard/health fields: redirect URL as this browser request would use for OAuth."""
+    eff = _facebook_redirect_for_request()
+    return {
+        "facebook_redirect_uri_valid": eff is not None,
+        "facebook_oauth_redirect_uri": eff or "",
+    }
+
+
 def _suggested_facebook_callback_url() -> str:
     """Exact redirect URI to show in errors — set this in Railway and Meta (same string)."""
+    eff = _facebook_redirect_for_request()
+    if eff:
+        return eff
     eff = facebook_graph.facebook_effective_redirect_uri()
     if eff:
         return eff
@@ -180,7 +212,7 @@ def get_accounts():
             "accounts": accounts,
             "posting_headless": bool(poster.headless),
             "facebook_oauth_configured": facebook_graph.facebook_oauth_configured(),
-            "facebook_redirect_uri_valid": facebook_graph.facebook_redirect_uri_valid(),
+            **_facebook_api_extras(),
         }
     )
 
@@ -199,7 +231,7 @@ def get_dashboard():
             # False only on a desktop with FB_HEADED=1; cloud is always True (no window on your PC).
             "posting_headless": bool(poster.headless),
             "facebook_oauth_configured": facebook_graph.facebook_oauth_configured(),
-            "facebook_redirect_uri_valid": facebook_graph.facebook_redirect_uri_valid(),
+            **_facebook_api_extras(),
         }
     )
 
@@ -349,13 +381,17 @@ def facebook_oauth_start():
                 )
             }
         ), 503
-    if not facebook_graph.facebook_redirect_uri_valid():
+    sch, host = _forwarded_scheme_host()
+    if not facebook_graph.facebook_effective_redirect_uri(
+        forwarded_scheme=sch,
+        forwarded_host=host,
+    ):
         want = _suggested_facebook_callback_url()
         return jsonify(
             {
                 "error": (
-                    f"Set PUBLIC_APP_URL=https://your-domain (no trailing path) or FACEBOOK_REDIRECT_URI={want}. "
-                    f"Do not use facebook.com URLs. Add this exact redirect in Meta → Valid OAuth Redirect URIs: {want}"
+                    "Could not build your Facebook callback URL. Open this app using your public https link "
+                    f"(not an IP address). Then add this exact line in Meta → Facebook Login → Valid OAuth Redirect URIs: {want}"
                 )
             }
         ), 503
@@ -364,7 +400,15 @@ def facebook_oauth_start():
         return jsonify({"error": "account_id query parameter is required"}), 400
     if not db.get_account(account_id):
         return jsonify({"error": "Account not found"}), 404
-    url = facebook_graph.oauth_authorize_url(account_id, app.secret_key)
+    try:
+        url = facebook_graph.oauth_authorize_url(
+            account_id,
+            app.secret_key,
+            forwarded_scheme=sch,
+            forwarded_host=host,
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 503
     return redirect(url)
 
 
@@ -379,14 +423,16 @@ def facebook_oauth_callback():
     if not code or not state:
         return redirect(f"{_public_app_base()}/?fb_error={quote('Missing authorization code')}")
     try:
-        aid = facebook_graph.parse_oauth_state(state, app.secret_key)
+        aid, redirect_uri = facebook_graph.parse_oauth_state(state, app.secret_key)
     except SignatureExpired:
         return redirect(
             f"{_public_app_base()}/?fb_error={quote('Session expired — open Accounts and click Connect Facebook again')}"
         )
     except BadSignature:
         return redirect(f"{_public_app_base()}/?fb_error={quote('Invalid OAuth state')}")
-    ok, msg = facebook_graph.complete_oauth_and_store(db, aid, code)
+    except ValueError as e:
+        return redirect(f"{_public_app_base()}/?fb_error={quote(str(e))}")
+    ok, msg = facebook_graph.complete_oauth_and_store(db, aid, code, redirect_uri=redirect_uri)
     if ok:
         return redirect(f"{_public_app_base()}/?fb_connected=1")
     return redirect(f"{_public_app_base()}/?fb_error={quote(msg or 'Facebook connection failed')}")
@@ -530,12 +576,25 @@ def post_now(post_id):
     if running_in_paas() and not has_browser_session:
         if plat in ("facebook", "fb", "both"):
             if facebook_graph.facebook_oauth_configured():
+                db_hint = ""
+                if os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PROJECT_ID"):
+                    dbp = (os.getenv("DATABASE_PATH") or "").strip()
+                    if not dbp or "fastpost.db" in dbp:
+                        db_hint = (
+                            " If you already connected before: SQLite may reset on each deploy unless "
+                            "DATABASE_PATH points to a persistent disk (e.g. /data/fastpost.db + Railway volume on /data). "
+                            "Then use Connect Facebook once more."
+                        )
                 return jsonify(
                     {
                         "error": (
-                            "This account is not connected to Facebook yet. Open Accounts, click "
-                            "Connect Facebook, finish Meta login, then try Post now again."
-                        )
+                            "No Facebook Page token saved for this account yet. In Accounts, click "
+                            "Connect Facebook, log in with Meta, and approve access — wait until you see "
+                            "\"Facebook connected\" (not an error). "
+                            "Your linked Page URL should be your Facebook Page link (or we match your business name to a Page you manage)."
+                            + db_hint
+                        ),
+                        "code": "facebook_graph_not_connected",
                     }
                 ), 400
             if (os.getenv("FACEBOOK_APP_ID") or "").strip() and (
@@ -661,7 +720,7 @@ def health():
             "version": "3.0.0",
             "posting_headless": bool(poster.headless),
             "facebook_oauth_configured": facebook_graph.facebook_oauth_configured(),
-            "facebook_redirect_uri_valid": facebook_graph.facebook_redirect_uri_valid(),
+            **_facebook_api_extras(),
         }
     )
 

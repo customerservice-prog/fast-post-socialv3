@@ -34,6 +34,8 @@ def main() -> None:
         assert "facebook_redirect_uri_valid" in h
         assert isinstance(h["facebook_redirect_uri_valid"], bool)
         assert d.get("facebook_redirect_uri_valid") == h["facebook_redirect_uri_valid"]
+        assert "facebook_oauth_redirect_uri" in d and isinstance(d["facebook_oauth_redirect_uri"], str)
+        assert h.get("facebook_oauth_redirect_uri") == d.get("facebook_oauth_redirect_uri")
 
     print("verify_api_posting_flags: ok")
 
