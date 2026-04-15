@@ -7,13 +7,40 @@
   <link rel="stylesheet" href="style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script>
+    try {
+      if (sessionStorage.getItem('fastpost_enter_overlay_dismissed_v1') === '1') {
+        document.documentElement.classList.add('enter-overlay-prefers-skip');
+      }
+    } catch (e) { /* ignore */ }
+  </script>
   </head>
   <body>
+
+  <!-- Full-screen welcome: logo + continue (dismissed for this browser session). -->
+  <div id="enterOverlay" class="enter-overlay" role="dialog" aria-modal="true" aria-labelledby="enterOverlayTitle" aria-describedby="enterOverlayDesc">
+    <div class="enter-overlay-inner">
+      <h2 id="enterOverlayTitle" class="visually-hidden">Welcome to FastPost Social</h2>
+      <img
+        id="enterOverlayLogo"
+        class="enter-overlay-logo"
+        src="/assets/autoposter-logo.png"
+        width="560"
+        height="560"
+        alt="AutoPoster — Social media automation"
+      />
+      <p id="enterOverlayDesc" class="enter-overlay-tagline muted">Social media automation — FastPost Social</p>
+      <button type="button" class="btn btn-primary enter-overlay-cta" id="enterOverlayBtn">
+        Enter dashboard
+      </button>
+      <p class="enter-overlay-hint muted">Press <kbd class="kbd">Enter</kbd> to continue</p>
+    </div>
+  </div>
 
   <!-- ===== SIDEBAR ===== -->
   <aside class="sidebar">
     <div class="sidebar-logo">
-      <span class="logo-icon" aria-hidden="true">&#9889;</span>
+      <img class="sidebar-logo-img" src="/assets/autoposter-logo.png" alt="" width="40" height="40" decoding="async" />
       <span class="logo-text">FastPost v3</span>
     </div>
     <nav class="sidebar-nav">

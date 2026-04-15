@@ -608,6 +608,130 @@ body.construction-locked {
     font-size: 15px;
 }
 
+/* ── ENTER OVERLAY (dashboard welcome) ── */
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+html.enter-overlay-prefers-skip #enterOverlay {
+    display: none !important;
+}
+
+body.enter-overlay-active {
+    overflow: hidden;
+}
+
+.enter-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 5000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: min(24px, 4vw);
+    background: radial-gradient(ellipse 120% 80% at 50% 20%, rgba(30, 40, 80, 0.5) 0%, transparent 55%),
+        rgba(6, 8, 14, 0.94);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+.enter-overlay.hidden {
+    display: none;
+}
+
+.enter-overlay-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 16px;
+    max-width: min(92vw, 680px);
+}
+
+.enter-overlay-logo {
+    width: 100%;
+    max-width: min(92vw, 560px);
+    height: auto;
+    object-fit: contain;
+    filter: drop-shadow(0 12px 40px rgba(0, 0, 0, 0.45));
+}
+
+.enter-overlay-tagline {
+    font-size: 15px;
+    margin: 0;
+}
+
+.enter-overlay-cta {
+    min-width: 200px;
+    padding: 12px 28px;
+    font-size: 15px;
+}
+
+.enter-overlay-hint {
+    font-size: 12px;
+    margin: 0;
+}
+
+.sidebar-logo-img {
+    width: 40px;
+    height: 40px;
+    object-fit: contain;
+    border-radius: 10px;
+    flex-shrink: 0;
+}
+
+.hero-with-logo .hero-logo-wrap {
+    display: flex;
+    justify-content: center;
+    margin: 0 0 28px;
+}
+
+.hero-logo {
+    width: 100%;
+    max-width: min(95vw, 520px);
+    height: auto;
+    object-fit: contain;
+    filter: drop-shadow(0 16px 48px rgba(0, 0, 0, 0.35));
+}
+
+.public-logo-with-img {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    text-decoration: none;
+}
+
+.public-header-logo-img {
+    width: 44px;
+    height: 44px;
+    object-fit: contain;
+    border-radius: 10px;
+    flex-shrink: 0;
+}
+
+.auth-brand-mark {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 20px;
+    text-decoration: none;
+}
+
+.auth-brand-mark-img {
+    width: min(120px, 28vw);
+    height: auto;
+    object-fit: contain;
+    border-radius: 12px;
+    filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.35));
+}
+
 /* ── PUBLIC / MARKETING ── */
 body.public-body {
     display: block;

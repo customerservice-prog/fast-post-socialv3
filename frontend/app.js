@@ -50,6 +50,7 @@ async function ensureSession() {
 document.addEventListener('DOMContentLoaded', async () => {
   const ok = await ensureSession();
   if (!ok) return;
+  initEnterOverlay();
   initFacebookOAuthLandingParams();
 
   document.getElementById('todayDate').textContent = new Date().toLocaleDateString('en-US', {
@@ -96,6 +97,46 @@ document.addEventListener('DOMContentLoaded', async () => {
   loadDashboard();
   checkScheduler();
 });
+
+const ENTER_OVERLAY_KEY = 'fastpost_enter_overlay_dismissed_v1';
+
+function initEnterOverlay() {
+  const el = document.getElementById('enterOverlay');
+  const btn = document.getElementById('enterOverlayBtn');
+  if (!el || !btn) return;
+
+  const dismiss = () => {
+    el.classList.add('hidden');
+    el.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('enter-overlay-active');
+    try {
+      sessionStorage.setItem(ENTER_OVERLAY_KEY, '1');
+    } catch { /* private mode */ }
+  };
+
+  if (sessionStorage.getItem(ENTER_OVERLAY_KEY) === '1') {
+    dismiss();
+    return;
+  }
+
+  document.body.classList.add('enter-overlay-active');
+  el.classList.remove('hidden');
+  el.setAttribute('aria-hidden', 'false');
+  btn.focus();
+
+  const onEnter = (e) => {
+    if (e.key !== 'Enter') return;
+    if (el.classList.contains('hidden')) return;
+    e.preventDefault();
+    dismiss();
+    document.removeEventListener('keydown', onEnter);
+  };
+  document.addEventListener('keydown', onEnter);
+  btn.addEventListener('click', () => {
+    dismiss();
+    document.removeEventListener('keydown', onEnter);
+  });
+}
 
 function initFacebookOAuthLandingParams() {
   const q = new URLSearchParams(window.location.search);
