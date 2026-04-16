@@ -124,16 +124,18 @@ def _log_startup_configuration_warnings() -> None:
         logger.warning(
             "STRIPE_WEBHOOK_SECRET is unset — webhook endpoint will respond 503 until set (use https://<host>/api/stripe/webhook in Stripe)."
         )
-    for label, var in (
-        ("Starter", "STRIPE_STARTER_PRICE_ID"),
-        ("Growth", "STRIPE_GROWTH_PRICE_ID"),
-        ("Agency", "STRIPE_AGENCY_PRICE_ID"),
+    for label, railway_key, legacy_key in (
+        ("Starter", "STRIPE_PRICE_ID_STARTER", "STRIPE_STARTER_PRICE_ID"),
+        ("Growth",  "STRIPE_PRICE_ID_GROWTH",  "STRIPE_GROWTH_PRICE_ID"),
+        ("Agency",  "STRIPE_PRICE_ID_AGENCY",  "STRIPE_AGENCY_PRICE_ID"),
     ):
-        if not (os.getenv(var) or "").strip():
+        val = (os.getenv(railway_key) or os.getenv(legacy_key) or "").strip()
+        if not val:
             logger.warning(
-                "%s (%s) is unset — map Stripe price IDs for checkout/plan sync (aliases STRIPE_PRICE_ID_* are not used by this app).",
+                "%s price ID is unset — set %s (or %s) in Railway env vars for Stripe Checkout/plan sync.",
                 label,
-                var,
+                railway_key,
+                legacy_key,
             )
     if not mail_is_configured():
         logger.warning(
@@ -190,10 +192,16 @@ def admin_required(f):
 
 def _stripe_price_for_plan(plan: str) -> Optional[str]:
     plan = (plan or "").lower().strip()
+    # Support both naming conventions:
+    #   STRIPE_PRICE_ID_STARTER  — Railway-standard (preferred)
+    #   STRIPE_STARTER_PRICE_ID  — legacy fallback
+    def _pid(railway_key: str, legacy_key: str) -> str:
+        v = (os.getenv(railway_key) or os.getenv(legacy_key) or "").strip()
+        return v
     m = {
-        "starter": os.getenv("STRIPE_STARTER_PRICE_ID"),
-        "growth": os.getenv("STRIPE_GROWTH_PRICE_ID"),
-        "agency": os.getenv("STRIPE_AGENCY_PRICE_ID"),
+        "starter": _pid("STRIPE_PRICE_ID_STARTER", "STRIPE_STARTER_PRICE_ID"),
+        "growth":  _pid("STRIPE_PRICE_ID_GROWTH",  "STRIPE_GROWTH_PRICE_ID"),
+        "agency":  _pid("STRIPE_PRICE_ID_AGENCY",  "STRIPE_AGENCY_PRICE_ID"),
     }
     pid = (m.get(plan) or "").strip()
     return pid or None
@@ -203,11 +211,14 @@ def _plan_for_stripe_price(price_id: str) -> Optional[str]:
     price_id = (price_id or "").strip()
     if not price_id:
         return None
-    if price_id == (os.getenv("STRIPE_STARTER_PRICE_ID") or "").strip():
+    # Support both naming conventions: STRIPE_PRICE_ID_* (Railway) and STRIPE_*_PRICE_ID (legacy)
+    def _get_price(railway_key: str, legacy_key: str) -> str:
+        return (os.getenv(railway_key) or os.getenv(legacy_key) or "").strip()
+    if price_id == _get_price("STRIPE_PRICE_ID_STARTER", "STRIPE_STARTER_PRICE_ID"):
         return "starter"
-    if price_id == (os.getenv("STRIPE_GROWTH_PRICE_ID") or "").strip():
+    if price_id == _get_price("STRIPE_PRICE_ID_GROWTH", "STRIPE_GROWTH_PRICE_ID"):
         return "growth"
-    if price_id == (os.getenv("STRIPE_AGENCY_PRICE_ID") or "").strip():
+    if price_id == _get_price("STRIPE_PRICE_ID_AGENCY", "STRIPE_AGENCY_PRICE_ID"):
         return "agency"
     return None
 
