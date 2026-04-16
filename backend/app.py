@@ -178,6 +178,17 @@ def _is_admin_user() -> bool:
     return bool(ae) and str(current_user.email).lower() == ae
 
 
+def _admin_override_user_row(real_row: dict) -> dict:
+    """Return a fake 'agency/active' row for the admin so all limits are bypassed."""
+    if not _is_admin_user():
+        return real_row
+    overridden = dict(real_row) if real_row else {}
+    overridden["plan_code"] = "agency"
+    overridden["subscription_status"] = "active"
+    overridden["trial_ends_at"] = None
+    return overridden
+
+
 def admin_required(f):
     from functools import wraps
 
@@ -738,6 +749,19 @@ def admin_override_subscription(user_id):
     return jsonify({"ok": True})
 
 
+@app.route("/api/admin/change-password", methods=["POST"])
+@login_required
+@admin_required
+def admin_change_password():
+    """Allow the admin to change their own password from the dashboard."""
+    data = request.get_json(silent=True) or {}
+    new_pw = (data.get("new_password") or "").strip()
+    if len(new_pw) < 8:
+        return jsonify({"error": "Password must be at least 8 characters"}), 400
+    db.set_user_password(current_user.id, new_pw)
+    return jsonify({"ok": True})
+
+
 # ─── ACCOUNT ROUTES ──────────────────────────────────────────────────────────
 
 
@@ -751,7 +775,7 @@ def get_accounts():
         _account_for_api(dict(a), hist.get(int(a["id"]), 0))
         for a in db.get_accounts_for_user(uid)
     ]
-    row = db.get_user_by_id(uid)
+    row = _admin_override_user_row(db.get_user_by_id(uid))
     can, reason = can_add_business(row, db.count_accounts_for_user(uid))
     return jsonify(
         {
@@ -774,7 +798,7 @@ def get_dashboard():
     uid = current_user.id
     today = date.today().strftime("%Y-%m-%d")
     hist_counts = db.get_post_history_counts(uid)
-    row = db.get_user_by_id(uid)
+    row = _admin_override_user_row(db.get_user_by_id(uid))
     can, reason = can_add_business(row, db.count_accounts_for_user(uid))
     return jsonify(
         {
@@ -821,7 +845,7 @@ def _empty_crawl_payload(business_url: str, err: str) -> dict:
 def add_account():
     """Link a new social media account"""
     uid = current_user.id
-    row = db.get_user_by_id(uid)
+    row = _admin_override_user_row(db.get_user_by_id(uid))
     n_accounts = db.count_accounts_for_user(uid)
     can, reason = can_add_business(row, n_accounts)
     if not can:
