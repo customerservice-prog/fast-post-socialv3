@@ -1,61 +1,374 @@
 {% extends "base_public.html" %}
-{% block title %}Admin — FastPost{% endblock %}
+{% block title %}Admin Dashboard — FastPost{% endblock %}
+
 {% block content %}
-<div class="public-inner" style="max-width:900px;margin:0 auto;padding:24px;">
-  <div style="margin-bottom:20px;"><a href="/"><img src="/assets/autoposter-logo.png" alt="FastPost" width="72" height="72" decoding="async" /></a></div>
-  <h1>Admin</h1>
-  <p id="load">Loading…</p>
-  <div id="stats" class="stats-row hidden"></div>
-  <div id="users" class="card hidden" style="margin-top:20px;overflow:auto;"></div>
-</div>
-<script>
-  async function load() {
-    const res = await fetch('/api/admin/summary', { credentials: 'include' });
-    const el = document.getElementById('load');
-    if (res.status === 403) {
-      el.textContent = 'Forbidden';
-      return;
-    }
-    const data = await res.json();
-    el.classList.add('hidden');
-    const st = document.getElementById('stats');
-    st.classList.remove('hidden');
-    st.innerHTML = `
-      <div class="stat-card"><div class="stat-number">${data.total_users}</div><div class="stat-label">Users</div></div>
-      <div class="stat-card"><div class="stat-number">${data.total_accounts}</div><div class="stat-label">Businesses</div></div>
-      <div class="stat-card"><div class="stat-number">${data.total_published_posts}</div><div class="stat-label">Posts published</div></div>
-    `;
-    const u = document.getElementById('users');
-    u.classList.remove('hidden');
-    u.innerHTML = '<h2>Users</h2>' + (data.users || []).map(row => {
-      const pc = row.plan_code || 'trial';
-      const opt = (v) => `<option value="${v}"${pc === v ? ' selected' : ''}>${v}</option>`;
-      return `
-      <div style="border-bottom:1px solid var(--border);padding:12px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-        <span><strong>${row.email}</strong></span>
-        <span class="muted">${row.plan_code} / ${row.subscription_status}</span>
-        <select data-uid="${row.id}" class="admin-plan-select" style="padding:6px;border-radius:6px;background:var(--bg2);color:var(--text);border:1px solid var(--border);">
-          ${opt('starter')}${opt('growth')}${opt('agency')}${opt('trial')}
-        </select>
-        <button type="button" class="btn btn-secondary btn-sm admin-apply" data-uid="${row.id}">Apply plan</button>
-      </div>
-    `;
-    }).join('');
-    document.querySelectorAll('.admin-apply').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const id = btn.getAttribute('data-uid');
-        const sel = document.querySelector('select.admin-plan-select[data-uid="' + id + '"]');
-        const plan_code = sel.value;
-        await fetch('/api/admin/users/' + id + '/subscription', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ plan_code, subscription_status: 'active' }),
-        });
-        load();
-      });
-    });
+<style>
+  /* ── Admin shell ── */
+  .admin-shell {
+    min-height: 100vh;
+    background: #0f1117;
+    color: #e2e8f0;
+    font-family: inherit;
   }
-  load();
+  .admin-topbar {
+    background: #1a1d27;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    padding: 0 32px;
+    height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .admin-topbar-left { display: flex; align-items: center; gap: 12px; }
+  .admin-topbar-logo { width: 32px; height: 32px; }
+  .admin-topbar-title { font-size: 16px; font-weight: 700; color: #fff; }
+  .admin-badge-small {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    background: rgba(239,68,68,0.15);
+    border: 1px solid rgba(239,68,68,0.3);
+    color: #f87171;
+    padding: 2px 8px;
+    border-radius: 12px;
+  }
+  .admin-topbar-right { display: flex; align-items: center; gap: 12px; }
+  .admin-user-pill {
+    font-size: 12px;
+    color: rgba(255,255,255,0.5);
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    padding: 4px 12px;
+    border-radius: 20px;
+  }
+  .btn-logout {
+    font-size: 12px;
+    color: #f87171;
+    background: rgba(239,68,68,0.1);
+    border: 1px solid rgba(239,68,68,0.25);
+    padding: 5px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.2s;
+  }
+  .btn-logout:hover { background: rgba(239,68,68,0.2); }
+
+  /* ── Main body ── */
+  .admin-body { padding: 32px; max-width: 1200px; margin: 0 auto; }
+
+  /* ── Stats ── */
+  .admin-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+  .admin-stat-card {
+    background: #1a1d27;
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 14px;
+    padding: 24px 20px;
+    text-align: center;
+  }
+  .admin-stat-num {
+    font-size: 36px;
+    font-weight: 800;
+    color: #fff;
+    line-height: 1;
+  }
+  .admin-stat-label {
+    font-size: 12px;
+    color: rgba(255,255,255,0.4);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-top: 6px;
+  }
+
+  /* ── Users table ── */
+  .admin-section {
+    background: #1a1d27;
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  .admin-section-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .admin-section-header h2 {
+    font-size: 16px;
+    font-weight: 700;
+    color: #fff;
+    margin: 0;
+  }
+  .admin-search {
+    padding: 8px 14px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 13px;
+    outline: none;
+    width: 220px;
+    transition: border-color 0.2s;
+  }
+  .admin-search:focus { border-color: rgba(99,102,241,0.5); }
+  .admin-search::placeholder { color: rgba(255,255,255,0.25); }
+
+  table.admin-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .admin-table th {
+    padding: 10px 16px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.4);
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    background: rgba(255,255,255,0.03);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .admin-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    color: #cbd5e1;
+    vertical-align: middle;
+  }
+  .admin-table tr:last-child td { border-bottom: none; }
+  .admin-table tr:hover td { background: rgba(255,255,255,0.02); }
+  .admin-table td .email-cell { color: #fff; font-weight: 500; }
+
+  .plan-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    padding: 3px 8px;
+    border-radius: 6px;
+  }
+  .plan-trial    { background: rgba(156,163,175,0.15); color: #9ca3af; border: 1px solid rgba(156,163,175,0.25); }
+  .plan-starter  { background: rgba(59,130,246,0.15);  color: #60a5fa; border: 1px solid rgba(59,130,246,0.25); }
+  .plan-growth   { background: rgba(16,185,129,0.15);  color: #34d399; border: 1px solid rgba(16,185,129,0.25); }
+  .plan-agency   { background: rgba(168,85,247,0.15);  color: #c084fc; border: 1px solid rgba(168,85,247,0.25); }
+  .plan-active   { background: rgba(16,185,129,0.12);  color: #6ee7b7; border: 1px solid rgba(16,185,129,0.2); }
+  .plan-inactive { background: rgba(239,68,68,0.12);   color: #fca5a5; border: 1px solid rgba(239,68,68,0.2); }
+
+  .admin-select {
+    padding: 5px 8px;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 6px;
+    color: #fff;
+    font-size: 12px;
+    outline: none;
+    cursor: pointer;
+  }
+  .btn-apply {
+    padding: 5px 12px;
+    background: rgba(99,102,241,0.2);
+    border: 1px solid rgba(99,102,241,0.3);
+    color: #818cf8;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+    white-space: nowrap;
+  }
+  .btn-apply:hover { background: rgba(99,102,241,0.35); }
+  .btn-apply.saving { opacity: 0.6; cursor: not-allowed; }
+
+  .no-results {
+    text-align: center;
+    padding: 48px;
+    color: rgba(255,255,255,0.25);
+    font-size: 14px;
+  }
+  .admin-refresh {
+    font-size: 12px;
+    color: rgba(255,255,255,0.35);
+    cursor: pointer;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    padding: 5px 12px;
+    border-radius: 8px;
+    transition: background 0.2s;
+  }
+  .admin-refresh:hover { background: rgba(255,255,255,0.1); color: #fff; }
+  .admin-loading {
+    text-align: center;
+    padding: 48px;
+    color: rgba(255,255,255,0.3);
+    font-size: 14px;
+  }
+</style>
+
+<div class="admin-shell">
+  <!-- Top bar -->
+  <div class="admin-topbar">
+    <div class="admin-topbar-left">
+      <img src="/assets/autoposter-logo.png" alt="FastPost" class="admin-topbar-logo" />
+      <span class="admin-topbar-title">FastPost</span>
+      <span class="admin-badge-small">Admin</span>
+    </div>
+    <div class="admin-topbar-right">
+      <span class="admin-user-pill" id="adminEmailPill">Loading…</span>
+      <a href="#" class="btn-logout" id="logoutBtn">Sign out</a>
+    </div>
+  </div>
+
+  <!-- Body -->
+  <div class="admin-body">
+
+    <!-- Stats row -->
+    <div class="admin-stats-grid" id="statsGrid">
+      <div class="admin-stat-card"><div class="admin-stat-num">—</div><div class="admin-stat-label">Total Users</div></div>
+      <div class="admin-stat-card"><div class="admin-stat-num">—</div><div class="admin-stat-label">Businesses</div></div>
+      <div class="admin-stat-card"><div class="admin-stat-num">—</div><div class="admin-stat-label">Posts Published</div></div>
+    </div>
+
+    <!-- Users table -->
+    <div class="admin-section">
+      <div class="admin-section-header">
+        <h2>Users</h2>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="search" class="admin-search" id="userSearch" placeholder="Search by email…" />
+          <button class="admin-refresh" id="refreshBtn">↻ Refresh</button>
+        </div>
+      </div>
+      <div id="tableWrap">
+        <div class="admin-loading">Loading users…</div>
+      </div>
+    </div>
+
+  </div><!-- /admin-body -->
+</div><!-- /admin-shell -->
+
+<script>
+let allUsers = [];
+
+async function loadData() {
+  const res = await fetch('/api/admin/summary', { credentials: 'include' });
+  if (res.status === 403) {
+    document.getElementById('tableWrap').innerHTML = '<div class="admin-loading" style="color:#f87171;">Access denied.</div>';
+    return;
+  }
+  const data = await res.json();
+
+  // Update pill
+  document.getElementById('adminEmailPill').textContent = data.admin_email || 'admin';
+
+  // Stats
+  const statNums = document.querySelectorAll('.admin-stat-num');
+  if (statNums[0]) statNums[0].textContent = data.total_users ?? '—';
+  if (statNums[1]) statNums[1].textContent = data.total_accounts ?? '—';
+  if (statNums[2]) statNums[2].textContent = data.total_published_posts ?? '—';
+
+  allUsers = data.users || [];
+  renderTable(allUsers);
+}
+
+function planClass(p) {
+  const m = { trial: 'plan-trial', starter: 'plan-starter', growth: 'plan-growth', agency: 'plan-agency' };
+  return m[p] || 'plan-trial';
+}
+function statusClass(s) {
+  return s === 'active' ? 'plan-active' : 'plan-inactive';
+}
+
+function renderTable(users) {
+  const wrap = document.getElementById('tableWrap');
+  if (!users.length) {
+    wrap.innerHTML = '<div class="no-results">No users found.</div>';
+    return;
+  }
+  wrap.innerHTML = `
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>Email</th>
+          <th>Joined</th>
+          <th>Plan</th>
+          <th>Status</th>
+          <th>Change Plan</th>
+          <th>Apply</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${users.map(u => {
+          const pc = u.plan_code || 'trial';
+          const ss = u.subscription_status || 'inactive';
+          const joined = u.created_at ? new Date(u.created_at).toLocaleDateString() : '—';
+          return `<tr>
+            <td><span class="email-cell">${u.email}</span></td>
+            <td>${joined}</td>
+            <td><span class="plan-badge ${planClass(pc)}">${pc}</span></td>
+            <td><span class="plan-badge ${statusClass(ss)}">${ss}</span></td>
+            <td>
+              <select class="admin-select" data-uid="${u.id}">
+                ${['trial','starter','growth','agency'].map(v => `<option value="${v}"${pc===v?' selected':''}>${v.charAt(0).toUpperCase()+v.slice(1)}</option>`).join('')}
+              </select>
+            </td>
+            <td>
+              <button class="btn-apply" data-uid="${u.id}">Apply</button>
+            </td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  `;
+
+  wrap.querySelectorAll('.btn-apply').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const uid = btn.getAttribute('data-uid');
+      const sel = wrap.querySelector(`select[data-uid="${uid}"]`);
+      btn.textContent = '…';
+      btn.classList.add('saving');
+      btn.disabled = true;
+      await fetch(`/api/admin/users/${uid}/subscription`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan_code: sel.value, subscription_status: 'active' }),
+      });
+      await loadData();
+    });
+  });
+}
+
+// Search
+document.getElementById('userSearch').addEventListener('input', function() {
+  const q = this.value.trim().toLowerCase();
+  renderTable(q ? allUsers.filter(u => u.email.toLowerCase().includes(q)) : allUsers);
+});
+
+// Refresh
+document.getElementById('refreshBtn').addEventListener('click', () => {
+  document.getElementById('tableWrap').innerHTML = '<div class="admin-loading">Refreshing…</div>';
+  loadData();
+});
+
+// Logout
+document.getElementById('logoutBtn').addEventListener('click', async (e) => {
+  e.preventDefault();
+  await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+  window.location.href = '/admin/login';
+});
+
+loadData();
 </script>
 {% endblock %}
