@@ -26,139 +26,90 @@
   .admin-topbar-logo { width: 32px; height: 32px; }
   .admin-topbar-title { font-size: 16px; font-weight: 700; color: #fff; }
   .admin-badge-small {
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 1.2px;
-    text-transform: uppercase;
-    background: rgba(239,68,68,0.15);
-    border: 1px solid rgba(239,68,68,0.3);
-    color: #f87171;
-    padding: 2px 8px;
-    border-radius: 12px;
+    font-size: 10px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase;
+    background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3); color: #f87171;
+    padding: 2px 8px; border-radius: 12px;
   }
   .admin-topbar-right { display: flex; align-items: center; gap: 12px; }
   .admin-user-pill {
-    font-size: 12px;
-    color: rgba(255,255,255,0.5);
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.1);
-    padding: 4px 12px;
-    border-radius: 20px;
+    font-size: 12px; color: rgba(255,255,255,0.5);
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+    padding: 4px 12px; border-radius: 20px;
   }
   .btn-logout {
-    font-size: 12px;
-    color: #f87171;
-    background: rgba(239,68,68,0.1);
-    border: 1px solid rgba(239,68,68,0.25);
-    padding: 5px 14px;
-    border-radius: 8px;
-    cursor: pointer;
-    text-decoration: none;
-    transition: background 0.2s;
+    font-size: 12px; color: #f87171; background: rgba(239,68,68,0.1);
+    border: 1px solid rgba(239,68,68,0.25); padding: 5px 14px; border-radius: 8px;
+    cursor: pointer; text-decoration: none; transition: background 0.2s;
   }
   .btn-logout:hover { background: rgba(239,68,68,0.2); }
-
-  /* ── Main body ── */
   .admin-body { padding: 32px; max-width: 1200px; margin: 0 auto; }
 
   /* ── Stats ── */
   .admin-stats-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 16px;
-    margin-bottom: 32px;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px; margin-bottom: 28px;
   }
   .admin-stat-card {
-    background: #1a1d27;
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 14px;
-    padding: 24px 20px;
-    text-align: center;
+    background: #1a1d27; border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 14px; padding: 24px 20px; text-align: center;
   }
-  .admin-stat-num {
-    font-size: 36px;
-    font-weight: 800;
-    color: #fff;
-    line-height: 1;
-  }
-  .admin-stat-label {
-    font-size: 12px;
-    color: rgba(255,255,255,0.4);
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
-    margin-top: 6px;
-  }
+  .admin-stat-num { font-size: 36px; font-weight: 800; color: #fff; line-height: 1; }
+  .admin-stat-label { font-size: 12px; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.8px; margin-top: 6px; }
 
-  /* ── Users table ── */
+  /* ── Sections ── */
   .admin-section {
-    background: #1a1d27;
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 14px;
-    overflow: hidden;
+    background: #1a1d27; border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 14px; overflow: hidden; margin-bottom: 24px;
   }
   .admin-section-header {
-    padding: 20px 24px;
-    border-bottom: 1px solid rgba(255,255,255,0.07);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 12px;
+    padding: 20px 24px; border-bottom: 1px solid rgba(255,255,255,0.07);
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;
   }
-  .admin-section-header h2 {
-    font-size: 16px;
-    font-weight: 700;
-    color: #fff;
-    margin: 0;
+  .admin-section-header h2 { font-size: 16px; font-weight: 700; color: #fff; margin: 0; }
+
+  /* ── Change-password card ── */
+  .pw-card { padding: 24px; }
+  .pw-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+  .pw-group { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 200px; }
+  .pw-group label { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.45); text-transform: uppercase; letter-spacing: 0.8px; }
+  .pw-input {
+    padding: 10px 14px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px; color: #fff; font-size: 14px; outline: none; transition: border-color 0.2s;
   }
+  .pw-input:focus { border-color: rgba(99,102,241,0.5); }
+  .btn-pw-save {
+    padding: 10px 22px; background: linear-gradient(135deg,#4f46e5,#6366f1);
+    color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 700;
+    cursor: pointer; white-space: nowrap; transition: opacity 0.2s;
+  }
+  .btn-pw-save:disabled { opacity: 0.5; cursor: not-allowed; }
+  .pw-msg { font-size: 13px; margin-top: 10px; padding: 8px 12px; border-radius: 7px; display: none; }
+  .pw-msg.ok  { background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.25); color: #6ee7b7; }
+  .pw-msg.err { background: rgba(239,68,68,0.12);  border: 1px solid rgba(239,68,68,0.25);  color: #fca5a5; }
+
+  /* ── Users table ── */
   .admin-search {
-    padding: 8px 14px;
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 8px;
-    color: #fff;
-    font-size: 13px;
-    outline: none;
-    width: 220px;
-    transition: border-color 0.2s;
+    padding: 8px 14px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px; color: #fff; font-size: 13px; outline: none; width: 220px; transition: border-color 0.2s;
   }
   .admin-search:focus { border-color: rgba(99,102,241,0.5); }
   .admin-search::placeholder { color: rgba(255,255,255,0.25); }
-
-  table.admin-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-  }
+  table.admin-table { width: 100%; border-collapse: collapse; font-size: 13px; }
   .admin-table th {
-    padding: 10px 16px;
-    text-align: left;
-    font-size: 11px;
-    font-weight: 600;
-    color: rgba(255,255,255,0.4);
-    text-transform: uppercase;
-    letter-spacing: 0.7px;
-    background: rgba(255,255,255,0.03);
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    padding: 10px 16px; text-align: left; font-size: 11px; font-weight: 600;
+    color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.7px;
+    background: rgba(255,255,255,0.03); border-bottom: 1px solid rgba(255,255,255,0.06);
   }
   .admin-table td {
-    padding: 12px 16px;
-    border-bottom: 1px solid rgba(255,255,255,0.05);
-    color: #cbd5e1;
-    vertical-align: middle;
+    padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.05);
+    color: #cbd5e1; vertical-align: middle;
   }
   .admin-table tr:last-child td { border-bottom: none; }
   .admin-table tr:hover td { background: rgba(255,255,255,0.02); }
   .admin-table td .email-cell { color: #fff; font-weight: 500; }
-
   .plan-badge {
-    display: inline-block;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
-    padding: 3px 8px;
-    border-radius: 6px;
+    display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.8px; padding: 3px 8px; border-radius: 6px;
   }
   .plan-trial    { background: rgba(156,163,175,0.15); color: #9ca3af; border: 1px solid rgba(156,163,175,0.25); }
   .plan-starter  { background: rgba(59,130,246,0.15);  color: #60a5fa; border: 1px solid rgba(59,130,246,0.25); }
@@ -166,54 +117,32 @@
   .plan-agency   { background: rgba(168,85,247,0.15);  color: #c084fc; border: 1px solid rgba(168,85,247,0.25); }
   .plan-active   { background: rgba(16,185,129,0.12);  color: #6ee7b7; border: 1px solid rgba(16,185,129,0.2); }
   .plan-inactive { background: rgba(239,68,68,0.12);   color: #fca5a5; border: 1px solid rgba(239,68,68,0.2); }
-
   .admin-select {
-    padding: 5px 8px;
-    background: rgba(255,255,255,0.07);
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 6px;
-    color: #fff;
-    font-size: 12px;
-    outline: none;
-    cursor: pointer;
+    padding: 5px 8px; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 6px; color: #fff; font-size: 12px; outline: none; cursor: pointer;
   }
   .btn-apply {
-    padding: 5px 12px;
-    background: rgba(99,102,241,0.2);
-    border: 1px solid rgba(99,102,241,0.3);
-    color: #818cf8;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.2s;
-    white-space: nowrap;
+    padding: 5px 12px; background: rgba(99,102,241,0.2); border: 1px solid rgba(99,102,241,0.3);
+    color: #818cf8; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;
+    transition: background 0.2s; white-space: nowrap;
   }
   .btn-apply:hover { background: rgba(99,102,241,0.35); }
   .btn-apply.saving { opacity: 0.6; cursor: not-allowed; }
-
-  .no-results {
-    text-align: center;
-    padding: 48px;
-    color: rgba(255,255,255,0.25);
-    font-size: 14px;
-  }
+  .no-results { text-align: center; padding: 48px; color: rgba(255,255,255,0.25); font-size: 14px; }
   .admin-refresh {
-    font-size: 12px;
-    color: rgba(255,255,255,0.35);
-    cursor: pointer;
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.1);
-    padding: 5px 12px;
-    border-radius: 8px;
-    transition: background 0.2s;
+    font-size: 12px; color: rgba(255,255,255,0.35); cursor: pointer;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+    padding: 5px 12px; border-radius: 8px; transition: background 0.2s;
   }
   .admin-refresh:hover { background: rgba(255,255,255,0.1); color: #fff; }
-  .admin-loading {
-    text-align: center;
-    padding: 48px;
-    color: rgba(255,255,255,0.3);
-    font-size: 14px;
+  .admin-loading { text-align: center; padding: 48px; color: rgba(255,255,255,0.3); font-size: 14px; }
+
+  /* ── Unlimited badge ── */
+  .unlimited-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase;
+    background: rgba(168,85,247,0.15); border: 1px solid rgba(168,85,247,0.3); color: #c084fc;
+    padding: 3px 10px; border-radius: 12px;
   }
 </style>
 
@@ -224,6 +153,7 @@
       <img src="/assets/autoposter-logo.png" alt="FastPost" class="admin-topbar-logo" />
       <span class="admin-topbar-title">FastPost</span>
       <span class="admin-badge-small">Admin</span>
+      <span class="unlimited-badge">♾ Unlimited</span>
     </div>
     <div class="admin-topbar-right">
       <span class="admin-user-pill" id="adminEmailPill">Loading…</span>
@@ -231,14 +161,34 @@
     </div>
   </div>
 
-  <!-- Body -->
   <div class="admin-body">
 
-    <!-- Stats row -->
+    <!-- Stats -->
     <div class="admin-stats-grid" id="statsGrid">
-      <div class="admin-stat-card"><div class="admin-stat-num">—</div><div class="admin-stat-label">Total Users</div></div>
-      <div class="admin-stat-card"><div class="admin-stat-num">—</div><div class="admin-stat-label">Businesses</div></div>
-      <div class="admin-stat-card"><div class="admin-stat-num">—</div><div class="admin-stat-label">Posts Published</div></div>
+      <div class="admin-stat-card"><div class="admin-stat-num" id="s-users">—</div><div class="admin-stat-label">Total Users</div></div>
+      <div class="admin-stat-card"><div class="admin-stat-num" id="s-biz">—</div><div class="admin-stat-label">Businesses</div></div>
+      <div class="admin-stat-card"><div class="admin-stat-num" id="s-posts">—</div><div class="admin-stat-label">Posts Published</div></div>
+    </div>
+
+    <!-- Change Password -->
+    <div class="admin-section">
+      <div class="admin-section-header">
+        <h2>🔑 Change Admin Password</h2>
+      </div>
+      <div class="pw-card">
+        <div class="pw-row">
+          <div class="pw-group">
+            <label for="newPw">New password</label>
+            <input type="password" id="newPw" class="pw-input" placeholder="Min. 8 characters" autocomplete="new-password" />
+          </div>
+          <div class="pw-group">
+            <label for="confirmPw">Confirm password</label>
+            <input type="password" id="confirmPw" class="pw-input" placeholder="Repeat password" autocomplete="new-password" />
+          </div>
+          <button class="btn-pw-save" id="savePwBtn">Save Password</button>
+        </div>
+        <div class="pw-msg" id="pwMsg"></div>
+      </div>
     </div>
 
     <!-- Users table -->
@@ -255,12 +205,13 @@
       </div>
     </div>
 
-  </div><!-- /admin-body -->
-</div><!-- /admin-shell -->
+  </div>
+</div>
 
 <script>
 let allUsers = [];
 
+// ── Load summary data ──
 async function loadData() {
   const res = await fetch('/api/admin/summary', { credentials: 'include' });
   if (res.status === 403) {
@@ -268,80 +219,53 @@ async function loadData() {
     return;
   }
   const data = await res.json();
-
-  // Update pill
   document.getElementById('adminEmailPill').textContent = data.admin_email || 'admin';
-
-  // Stats
-  const statNums = document.querySelectorAll('.admin-stat-num');
-  if (statNums[0]) statNums[0].textContent = data.total_users ?? '—';
-  if (statNums[1]) statNums[1].textContent = data.total_accounts ?? '—';
-  if (statNums[2]) statNums[2].textContent = data.total_published_posts ?? '—';
-
+  document.getElementById('s-users').textContent = data.total_users ?? '—';
+  document.getElementById('s-biz').textContent   = data.total_accounts ?? '—';
+  document.getElementById('s-posts').textContent = data.total_published_posts ?? '—';
   allUsers = data.users || [];
   renderTable(allUsers);
 }
 
+// ── Table rendering ──
 function planClass(p) {
-  const m = { trial: 'plan-trial', starter: 'plan-starter', growth: 'plan-growth', agency: 'plan-agency' };
-  return m[p] || 'plan-trial';
+  return { trial:'plan-trial', starter:'plan-starter', growth:'plan-growth', agency:'plan-agency' }[p] || 'plan-trial';
 }
-function statusClass(s) {
-  return s === 'active' ? 'plan-active' : 'plan-inactive';
-}
+function statusClass(s) { return s === 'active' ? 'plan-active' : 'plan-inactive'; }
 
 function renderTable(users) {
   const wrap = document.getElementById('tableWrap');
-  if (!users.length) {
-    wrap.innerHTML = '<div class="no-results">No users found.</div>';
-    return;
-  }
+  if (!users.length) { wrap.innerHTML = '<div class="no-results">No users found.</div>'; return; }
   wrap.innerHTML = `
     <table class="admin-table">
-      <thead>
-        <tr>
-          <th>Email</th>
-          <th>Joined</th>
-          <th>Plan</th>
-          <th>Status</th>
-          <th>Change Plan</th>
-          <th>Apply</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${users.map(u => {
-          const pc = u.plan_code || 'trial';
-          const ss = u.subscription_status || 'inactive';
-          const joined = u.created_at ? new Date(u.created_at).toLocaleDateString() : '—';
-          return `<tr>
-            <td><span class="email-cell">${u.email}</span></td>
-            <td>${joined}</td>
-            <td><span class="plan-badge ${planClass(pc)}">${pc}</span></td>
-            <td><span class="plan-badge ${statusClass(ss)}">${ss}</span></td>
-            <td>
-              <select class="admin-select" data-uid="${u.id}">
-                ${['trial','starter','growth','agency'].map(v => `<option value="${v}"${pc===v?' selected':''}>${v.charAt(0).toUpperCase()+v.slice(1)}</option>`).join('')}
-              </select>
-            </td>
-            <td>
-              <button class="btn-apply" data-uid="${u.id}">Apply</button>
-            </td>
-          </tr>`;
-        }).join('')}
-      </tbody>
-    </table>
-  `;
-
+      <thead><tr>
+        <th>Email</th><th>Joined</th><th>Plan</th><th>Status</th><th>Change Plan</th><th>Apply</th>
+      </tr></thead>
+      <tbody>${users.map(u => {
+        const pc = u.plan_code || 'trial';
+        const ss = u.subscription_status || 'inactive';
+        const joined = u.created_at ? new Date(u.created_at).toLocaleDateString() : '—';
+        return `<tr>
+          <td><span class="email-cell">${u.email}</span></td>
+          <td>${joined}</td>
+          <td><span class="plan-badge ${planClass(pc)}">${pc}</span></td>
+          <td><span class="plan-badge ${statusClass(ss)}">${ss}</span></td>
+          <td>
+            <select class="admin-select" data-uid="${u.id}">
+              ${['trial','starter','growth','agency'].map(v=>`<option value="${v}"${pc===v?' selected':''}>${v.charAt(0).toUpperCase()+v.slice(1)}</option>`).join('')}
+            </select>
+          </td>
+          <td><button class="btn-apply" data-uid="${u.id}">Apply</button></td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
   wrap.querySelectorAll('.btn-apply').forEach(btn => {
     btn.addEventListener('click', async () => {
       const uid = btn.getAttribute('data-uid');
       const sel = wrap.querySelector(`select[data-uid="${uid}"]`);
-      btn.textContent = '…';
-      btn.classList.add('saving');
-      btn.disabled = true;
+      btn.textContent = '…'; btn.classList.add('saving'); btn.disabled = true;
       await fetch(`/api/admin/users/${uid}/subscription`, {
-        method: 'POST',
-        credentials: 'include',
+        method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ plan_code: sel.value, subscription_status: 'active' }),
       });
@@ -350,23 +274,68 @@ function renderTable(users) {
   });
 }
 
-// Search
+// ── Search ──
 document.getElementById('userSearch').addEventListener('input', function() {
   const q = this.value.trim().toLowerCase();
   renderTable(q ? allUsers.filter(u => u.email.toLowerCase().includes(q)) : allUsers);
 });
 
-// Refresh
+// ── Refresh ──
 document.getElementById('refreshBtn').addEventListener('click', () => {
   document.getElementById('tableWrap').innerHTML = '<div class="admin-loading">Refreshing…</div>';
   loadData();
 });
 
-// Logout
+// ── Logout ──
 document.getElementById('logoutBtn').addEventListener('click', async (e) => {
   e.preventDefault();
   await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
   window.location.href = '/admin/login';
+});
+
+// ── Change Password ──
+document.getElementById('savePwBtn').addEventListener('click', async () => {
+  const newPw      = document.getElementById('newPw').value;
+  const confirmPw  = document.getElementById('confirmPw').value;
+  const msg        = document.getElementById('pwMsg');
+  const btn        = document.getElementById('savePwBtn');
+
+  msg.style.display = 'none';
+  msg.className = 'pw-msg';
+
+  if (newPw.length < 8) {
+    msg.textContent = 'Password must be at least 8 characters.';
+    msg.className = 'pw-msg err'; msg.style.display = 'block'; return;
+  }
+  if (newPw !== confirmPw) {
+    msg.textContent = 'Passwords do not match.';
+    msg.className = 'pw-msg err'; msg.style.display = 'block'; return;
+  }
+
+  btn.textContent = 'Saving…'; btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/admin/change-password', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ new_password: newPw }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      msg.textContent = data.error || 'Failed to update password.';
+      msg.className = 'pw-msg err';
+    } else {
+      msg.textContent = '✓ Password updated successfully.';
+      msg.className = 'pw-msg ok';
+      document.getElementById('newPw').value = '';
+      document.getElementById('confirmPw').value = '';
+    }
+  } catch {
+    msg.textContent = 'Network error — please try again.';
+    msg.className = 'pw-msg err';
+  }
+  msg.style.display = 'block';
+  btn.textContent = 'Save Password'; btn.disabled = false;
 });
 
 loadData();
