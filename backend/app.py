@@ -45,6 +45,7 @@ from crawler import BusinessCrawler
 from ai_generator import AIContentGenerator
 from scheduler import PostScheduler
 import facebook_graph
+import youtube_video
 from publish_service import publish_post_with_deps
 from subscription_limits import (
     account_week_approved_for_current_week,
@@ -1273,12 +1274,176 @@ def stop_scheduler():
     scheduler.stop()
     return jsonify({"message": "Scheduler stopped"})
 
+@app.route("/api/scheduler/trigger-today", methods=["POST"])
+@login_required
+def trigger_today():
+    """
+    One-click: publish ALL of today's pending posts for weekly-approved accounts.
+    Randomized order + 15-90s inter-post delays (anti-bot spread).
+    Runs in background thread so request returns immediately.
+    """
+    import threading
+    def _run():
+        result = scheduler.trigger_today_all()
+        logger.info("[API] trigger-today complete: %s", result)
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    return jsonify({
+        "ok": True,
+        "message": "Auto-posting today's drafts in background. Check Dashboard in a few minutes."
+    })
+
 
 @app.route("/api/scheduler/status", methods=["GET"])
 @login_required
 def scheduler_status():
     """Get scheduler status"""
     return jsonify({"running": scheduler.is_running(), "next_run": scheduler.next_run()})
+
+
+
+# ─── YOUTUBE ROUTES ────────────────────────────────────────────────────────────
+
+@app.route("/api/youtube/oauth/start", methods=["GET"])
+@login_required
+def youtube_oauth_start():
+    """Redirect to Google OAuth for YouTube access."""
+    account_id = request.args.get("account_id", type=int)
+    if not account_id:
+        return jsonify({"error": "account_id required"}), 400
+    if not db.get_account(account_id, current_user.id):
+        return jsonify({"error": "Account not found"}), 404
+    if not youtube_video.youtube_configured():
+        return jsonify({"error": "YouTube not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in Railway."}), 503
+    redirect_uri = _youtube_redirect_uri()
+    url = youtube_video.build_oauth_authorize_url(account_id, redirect_uri, app.secret_key)
+    if not url:
+        return jsonify({"error": "Could not build Google OAuth URL"}), 503
+    return redirect(url)
+
+
+@app.route("/api/youtube/oauth/callback", methods=["GET"])
+def youtube_oauth_callback():
+    """Google redirects here after YouTube authorization."""
+    base_dash = _public_app_base().rstrip("/") + "/dashboard"
+    error = request.args.get("error")
+    if error:
+        return redirect(f"{base_dash}?yt_error={quote(error[:200])}")
+    code = request.args.get("code")
+    state = request.args.get("state", "")
+    if not code:
+        return redirect(f"{base_dash}?yt_error={quote('No code returned')}")
+    # Parse account_id from state (format: "account_id:hmac")
+    try:
+        account_id = int(state.split(":")[0])
+    except (ValueError, IndexError):
+        return redirect(f"{base_dash}?yt_error={quote('Invalid state parameter')}")
+    redirect_uri = _youtube_redirect_uri()
+    ok, msg = youtube_video.complete_oauth_and_store(db, account_id, code, redirect_uri)
+    if ok:
+        return redirect(f"{base_dash}?yt_connected=1")
+    return redirect(f"{base_dash}?yt_error={quote(msg[:200])}")
+
+
+@app.route("/api/youtube/create-video", methods=["POST"])
+@login_required
+def create_youtube_video():
+    """
+    Generate an animated AI video from a post caption and upload it to YouTube.
+    Body: { account_id, post_id (optional), title, description, use_dall_e (bool) }
+    """
+    data = request.get_json(silent=True) or {}
+    account_id = data.get("account_id")
+    post_id = data.get("post_id")
+    title = (data.get("title") or "").strip()
+    description = (data.get("description") or "").strip()
+    use_dall_e = bool(data.get("use_dall_e", True))
+    privacy = (data.get("privacy") or "public").strip()
+
+    if not account_id:
+        return jsonify({"error": "account_id required"}), 400
+    account = db.get_account(int(account_id), current_user.id)
+    if not account:
+        return jsonify({"error": "Account not found"}), 404
+
+    caption = description
+    image_prompts = []
+
+    if post_id:
+        post = db.get_post(int(post_id), current_user.id)
+        if post:
+            caption = post.get("caption") or caption
+            ip = (post.get("image_prompt") or "").strip()
+            if ip:
+                image_prompts = [ip] * 5
+
+    if not caption:
+        return jsonify({"error": "No caption/description provided"}), 400
+    if not title:
+        title = f"{account['business_name']} — Video Update"
+    if not image_prompts:
+        image_prompts = [
+            f"Professional scene for {account['business_name']}",
+        ] * 5
+
+    import threading, time as _time
+
+    result_container = {}
+
+    def _run():
+        try:
+            video_bytes = youtube_video.create_animated_video(
+                business_name=account["business_name"],
+                caption=caption,
+                image_prompts=image_prompts,
+                post_type="default",
+                use_dall_e=use_dall_e,
+            )
+            if not video_bytes:
+                result_container["error"] = "Video generation failed (check moviepy/ffmpeg install)"
+                return
+            ok, vid_id_or_err = youtube_video.upload_video_to_youtube(
+                db=db,
+                account_id=int(account_id),
+                video_bytes=video_bytes,
+                title=title,
+                description=caption,
+                tags=[account["business_name"], "business", "marketing"],
+                privacy=privacy,
+            )
+            if ok:
+                result_container["video_id"] = vid_id_or_err
+                result_container["url"] = f"https://youtu.be/{vid_id_or_err}"
+            else:
+                result_container["error"] = vid_id_or_err
+        except Exception as e:
+            result_container["error"] = str(e)[:300]
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    t.join(timeout=600)  # max 10 min for video generation + upload
+
+    if "video_id" in result_container:
+        return jsonify({"ok": True, "video_id": result_container["video_id"], "url": result_container["url"]})
+    return jsonify({"error": result_container.get("error", "Video creation timed out")}), 500
+
+
+@app.route("/api/youtube/status/<int:account_id>", methods=["GET"])
+@login_required
+def youtube_status(account_id):
+    """Check if YouTube is connected for this account."""
+    if not db.get_account(account_id, current_user.id):
+        return jsonify({"error": "Account not found"}), 404
+    connected = bool(db.get_youtube_token(account_id))
+    return jsonify({
+        "connected": connected,
+        "configured": youtube_video.youtube_configured(),
+    })
+
+
+def _youtube_redirect_uri() -> str:
+    base = _public_app_base().rstrip("/")
+    return f"{base}/api/youtube/oauth/callback"
 
 
 # ─── HEALTH CHECK ────────────────────────────────────────────────────────────
