@@ -720,6 +720,7 @@ def admin_summary():
             "total_users": len(users),
             "total_accounts": db.count_all_accounts_global(),
             "total_published_posts": db.count_all_published_posts_global(),
+            "admin_email": _admin_email(),
         }
     )
 
