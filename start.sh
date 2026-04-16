@@ -23,6 +23,7 @@ fi
 PORT="${PORT:-5000}"
 TIMEOUT="${GUNICORN_TIMEOUT:-${POST_TIMEOUT_SECONDS:-840}}"
 case "$TIMEOUT" in ''|*[!0-9]*) TIMEOUT=840;; esac
+echo "[FastPost] Gunicorn 0.0.0.0:${PORT} cwd=$(pwd) python=${PYTHON}"
 exec "$PYTHON" -m gunicorn -w 1 -k gthread --threads 4 \
   -b "0.0.0.0:${PORT}" \
   --timeout "$TIMEOUT" \

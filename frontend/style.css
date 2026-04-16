@@ -725,7 +725,7 @@ body.enter-overlay-active {
 }
 
 .auth-brand-mark-img {
-    width: min(120px, 28vw);
+    width: min(168px, 40vw);
     height: auto;
     object-fit: contain;
     border-radius: 12px;

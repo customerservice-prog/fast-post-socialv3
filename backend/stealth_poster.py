@@ -12,6 +12,8 @@ STEALTH TECHNIQUES:
 6. Natural typing speed variation
 """
 
+from __future__ import annotations
+
 import asyncio
 import random
 import os
@@ -21,13 +23,24 @@ import time
 import logging
 from pathlib import Path
 from urllib.parse import urlparse
-from typing import Dict, Optional, List, Union
-from playwright.async_api import async_playwright, Page, Locator, ElementHandle
-from playwright_stealth import Stealth
+from typing import TYPE_CHECKING, Dict, Optional, List, Union
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page, Locator, ElementHandle
 
 logger = logging.getLogger(__name__)
 
-_stealth = Stealth()
+_stealth_plugin = None
+
+
+def _get_stealth():
+    """Load playwright-stealth only when posting (faster Gunicorn/Railway cold start)."""
+    global _stealth_plugin
+    if _stealth_plugin is None:
+        from playwright_stealth import Stealth
+
+        _stealth_plugin = Stealth()
+    return _stealth_plugin
 
 _BACKEND_DIR = Path(__file__).resolve().parent
 _default_profiles = _BACKEND_DIR / "browser_profiles"
@@ -191,6 +204,8 @@ class StealthPoster:
             }
 
         result: Dict = {"success": False, "error": "Interrupted"}
+        from playwright.async_api import async_playwright
+
         playwright = await async_playwright().start()
         context = None
         ephemeral_browser = None
@@ -248,7 +263,7 @@ class StealthPoster:
                 )
 
             page = context.pages[0] if context.pages else await context.new_page()
-            await _stealth.apply_stealth_async(page)
+            await _get_stealth().apply_stealth_async(page)
 
             if platform.lower() in ["facebook", "fb", "both"]:
                 result = await self._post_facebook(page, page_url, caption)
