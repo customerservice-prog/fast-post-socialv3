@@ -5,6 +5,7 @@ SQLite database for accounts, posts, crawl data, and analytics
 
 import sqlite3
 import json
+import logging
 import os
 import hashlib
 import secrets
@@ -16,6 +17,7 @@ from werkzeug.security import generate_password_hash
 
 from migrations.saas_v5 import apply_saas_migration
 
+logger = logging.getLogger(__name__)
 
 # Default DB path is next to this file so it does not depend on process cwd (Gunicorn, Railway, etc.).
 _BACKEND_DIR = Path(__file__).resolve().parent
@@ -64,9 +66,34 @@ CREATE TABLE IF NOT EXISTS analytics (
 
 class Database:
     def __init__(self, db_path: str = DB_PATH):
-        self.db_path = db_path
-        Path(db_path).resolve().parent.mkdir(parents=True, exist_ok=True)
+        self.db_path = self._ensure_writable_db_path(db_path)
+        Path(self.db_path).resolve().parent.mkdir(parents=True, exist_ok=True)
         self.init_db()
+
+    @staticmethod
+    def _ensure_writable_db_path(db_path: str) -> str:
+        """
+        Railway users often set DATABASE_PATH=/data/... without a volume; mkdir then fails and
+        the app never binds (healthcheck 503). Fall back to fastpost.db next to this package.
+        """
+        path = Path(db_path).expanduser()
+        if not path.is_absolute():
+            path = (_BACKEND_DIR / path).resolve()
+        else:
+            path = path.resolve()
+        parent = path.parent
+        try:
+            parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            fb = _BACKEND_DIR / "fastpost.db"
+            logger.warning(
+                "Could not create database directory %s (%s); using %s",
+                parent,
+                exc,
+                fb,
+            )
+            return str(fb)
+        return str(path)
 
     def get_conn(self):
         conn = sqlite3.connect(self.db_path, timeout=30.0)

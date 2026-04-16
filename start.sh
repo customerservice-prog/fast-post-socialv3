@@ -14,10 +14,16 @@ if [ "${PLAYWRIGHT_RUNTIME_INSTALL:-}" = "1" ]; then
   python -m playwright install chromium 2>/dev/null || true
 fi
 export PYTHONUNBUFFERED=1
+# Railpack puts the venv at /app/.venv — `gunicorn` alone is often NOT on PATH at runtime.
+if [ -x "$ROOT/.venv/bin/python" ]; then
+  PYTHON="$ROOT/.venv/bin/python"
+else
+  PYTHON="python"
+fi
 PORT="${PORT:-5000}"
 TIMEOUT="${GUNICORN_TIMEOUT:-${POST_TIMEOUT_SECONDS:-840}}"
 case "$TIMEOUT" in ''|*[!0-9]*) TIMEOUT=840;; esac
-exec gunicorn -w 1 -k gthread --threads 4 \
+exec "$PYTHON" -m gunicorn -w 1 -k gthread --threads 4 \
   -b "0.0.0.0:${PORT}" \
   --timeout "$TIMEOUT" \
   --graceful-timeout 30 \

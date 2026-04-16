@@ -29,8 +29,26 @@ logger = logging.getLogger(__name__)
 
 _stealth = Stealth()
 
-PROFILES_DIR = Path(os.getenv("PROFILES_DIR", "./browser_profiles"))
-PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+_BACKEND_DIR = Path(__file__).resolve().parent
+_default_profiles = _BACKEND_DIR / "browser_profiles"
+PROFILES_DIR = Path(os.getenv("PROFILES_DIR", str(_default_profiles)))
+try:
+    PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+except OSError as exc:
+    logger.warning(
+        "Could not create PROFILES_DIR %s (%s); trying default under package",
+        PROFILES_DIR,
+        exc,
+    )
+    PROFILES_DIR = _default_profiles
+    try:
+        PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError as exc2:
+        import tempfile
+
+        PROFILES_DIR = Path(tempfile.gettempdir()) / "fastpost_browser_profiles"
+        PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+        logger.warning("Using temp PROFILES_DIR %s (%s)", PROFILES_DIR, exc2)
 
 # Saved via POST /api/accounts/<id>/playwright-storage — required for headless cloud posting (no login UI).
 UPLOADED_STORAGE_NAME = "uploaded_storage.json"

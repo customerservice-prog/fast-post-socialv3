@@ -6,7 +6,7 @@ Pinned configuration in this repo (commit and redeploy from **`main`**):
 |------|------|
 | **`railway.json`** | Railway / Railpack: `buildCommand` → `sh build.sh`, `startCommand` → `sh start.sh`, health → **`GET /api/health`** |
 | **`build.sh`** | `pip install -r requirements.txt` + `playwright install --with-deps chromium` (uses **`PLAYWRIGHT_BROWSERS_PATH`** when set) |
-| **`start.sh`** | **Gunicorn** → `backend/wsgi.py` (uses **`PORT`**). Playwright browsers are installed in **`build.sh`** only — runtime install is opt-in via **`PLAYWRIGHT_RUNTIME_INSTALL=1`** (not recommended on Railway; can delay or fail healthchecks). |
+| **`start.sh`** | **`/app/.venv/bin/python -m gunicorn`** (falls back to `python`) so the worker always uses the Railpack venv. Playwright browsers are installed in **`build.sh`** only — runtime install is opt-in via **`PLAYWRIGHT_RUNTIME_INSTALL=1`**. |
 | **`Procfile`** | `web: sh start.sh` (fallback for platforms that read Procfile) |
 | **`render.yaml`** | Optional Render Blueprint only (not used by Railway) |
 | **`requirements.txt`** | Python deps at repo root (Railpack install layer) |
