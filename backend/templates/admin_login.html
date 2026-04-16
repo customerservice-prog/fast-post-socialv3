@@ -1,0 +1,209 @@
+{% extends "base_public.html" %}
+{% block title %}Admin Login — FastPost{% endblock %}
+
+{% block content %}
+<style>
+  .admin-login-wrap {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%);
+    padding: 24px;
+  }
+  .admin-login-card {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    padding: 48px 40px;
+    width: 100%;
+    max-width: 420px;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.5);
+    backdrop-filter: blur(12px);
+  }
+  .admin-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(239,68,68,0.15);
+    border: 1px solid rgba(239,68,68,0.3);
+    color: #f87171;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    border-radius: 20px;
+    margin-bottom: 20px;
+  }
+  .admin-login-card h1 {
+    font-size: 28px;
+    font-weight: 800;
+    color: #fff;
+    margin: 0 0 6px 0;
+  }
+  .admin-login-card .subtitle {
+    color: rgba(255,255,255,0.45);
+    font-size: 13px;
+    margin-bottom: 32px;
+  }
+  .admin-login-card .form-group {
+    margin-bottom: 18px;
+  }
+  .admin-login-card label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.6);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 8px;
+  }
+  .admin-login-card input {
+    width: 100%;
+    padding: 12px 16px;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 10px;
+    color: #fff;
+    font-size: 15px;
+    outline: none;
+    transition: border-color 0.2s, background 0.2s;
+    box-sizing: border-box;
+  }
+  .admin-login-card input:focus {
+    border-color: rgba(239,68,68,0.5);
+    background: rgba(255,255,255,0.1);
+  }
+  .admin-login-card input::placeholder {
+    color: rgba(255,255,255,0.25);
+  }
+  .btn-admin-login {
+    width: 100%;
+    padding: 14px;
+    background: linear-gradient(135deg, #dc2626, #b91c1c);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    margin-top: 8px;
+    transition: opacity 0.2s, transform 0.1s;
+    letter-spacing: 0.3px;
+  }
+  .btn-admin-login:hover { opacity: 0.9; transform: translateY(-1px); }
+  .btn-admin-login:active { transform: translateY(0); }
+  .admin-error {
+    background: rgba(239,68,68,0.12);
+    border: 1px solid rgba(239,68,68,0.3);
+    color: #f87171;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 13px;
+    margin-top: 14px;
+    display: none;
+  }
+  .admin-back {
+    text-align: center;
+    margin-top: 24px;
+    font-size: 13px;
+    color: rgba(255,255,255,0.3);
+  }
+  .admin-back a { color: rgba(255,255,255,0.45); text-decoration: none; }
+  .admin-back a:hover { color: rgba(255,255,255,0.7); }
+  .lock-icon {
+    width: 48px;
+    height: 48px;
+    background: rgba(239,68,68,0.12);
+    border: 1px solid rgba(239,68,68,0.25);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 20px;
+    font-size: 22px;
+  }
+</style>
+
+<div class="admin-login-wrap">
+  <div class="admin-login-card">
+    <div class="lock-icon">🔐</div>
+    <div class="admin-badge">
+      <span>⚡</span> Admin Access
+    </div>
+    <h1>Admin Login</h1>
+    <p class="subtitle">Restricted area — authorised personnel only.</p>
+
+    <form id="adminLoginForm">
+      <div class="form-group">
+        <label for="email">Email address</label>
+        <input type="email" id="email" placeholder="admin@example.com" required autocomplete="username" />
+      </div>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" placeholder="••••••••" required autocomplete="current-password" />
+      </div>
+      <button type="submit" class="btn-admin-login" id="loginBtn">Sign in to Admin</button>
+      <div class="admin-error" id="adminErr"></div>
+    </form>
+
+    <div class="admin-back">
+      <a href="/">← Back to FastPost</a>
+    </div>
+  </div>
+</div>
+
+<script>
+const nextUrl = {{ (next_url or '/admin')|tojson }};
+
+document.getElementById('adminLoginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = document.getElementById('adminErr');
+  const btn = document.getElementById('loginBtn');
+  errEl.style.display = 'none';
+  btn.textContent = 'Signing in…';
+  btn.disabled = true;
+
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      errEl.textContent = data.error || 'Invalid credentials.';
+      errEl.style.display = 'block';
+      btn.textContent = 'Sign in to Admin';
+      btn.disabled = false;
+      return;
+    }
+
+    // Check if the logged-in user is actually an admin
+    const meRes = await fetch('/api/admin/summary', { credentials: 'include' });
+    if (meRes.status === 403) {
+      // Not an admin — log them back out
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+      errEl.textContent = 'This account does not have admin privileges.';
+      errEl.style.display = 'block';
+      btn.textContent = 'Sign in to Admin';
+      btn.disabled = false;
+      return;
+    }
+
+    window.location.href = nextUrl || '/admin';
+  } catch (err) {
+    errEl.textContent = 'Network error — please try again.';
+    errEl.style.display = 'block';
+    btn.textContent = 'Sign in to Admin';
+    btn.disabled = false;
+  }
+});
+</script>
+{% endblock %}
