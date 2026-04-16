@@ -14,7 +14,9 @@ Pinned configuration in this repo (commit and redeploy from **`main`**):
 ## Railway (recommended)
 
 1. Connect this GitHub repo; Railpack picks up **`railway.json`**.
-2. **Variables** (service → Variables):
+2. **Build vs runtime (Stripe and other secrets):** This app does **not** read `STRIPE_*` (or any billing keys) in `build.sh` / Dockerfile — they are **runtime-only**. If the build fails with **`secret STRIPE_PUBLISHABLE_KEY: not found`** (or similar), Railway’s BuildKit is trying to inject a variable that is not available at build time. In **Railway → Service → Variables**, open each Stripe variable and turn **off** “available at build time” / **build-time** exposure (names vary by UI). Only enable build-time vars if you truly reference them in the install/build command; this repo does not. Redeploy after fixing. **`requirements.txt` already includes `stripe>=11`** — no publishable key is required to `pip install`.
+3. **Stripe webhooks:** Configure the endpoint as **`https://<your-domain>/api/stripe/webhook`** (HTTPS). The app also accepts **misconfigured** `POST /` requests that include a **`Stripe-Signature`** header and logs a warning — fix the dashboard URL when convenient.
+4. **Variables** (service → Variables):
 
 | Variable | Value |
 |----------|--------|
@@ -44,13 +46,13 @@ Pinned configuration in this repo (commit and redeploy from **`main`**):
 | `MAIL_PASSWORD` | SMTP password (SendGrid: API key). |
 | `MAIL_DEFAULT_SENDER` | From header, e.g. `FastPost <no-reply@yourdomain.com>`. |
 
-3. **Volume:** mount at **`/data`** and set **`DATABASE_PATH=/data/fastpost.db`**. Without this, SQLite lives on ephemeral disk and **accounts disappear on every redeploy** (the app will log the DB path at startup).
-4. **Posting:** runs **headless** on the server — no browser window on your PC (see Settings in the app).
-5. **Facebook (recommended):** add a Meta app with **Facebook Login**; set the `FACEBOOK_*` variables and the redirect URI above. In the app: **Accounts → Connect Facebook** once per account, then **Post now** uses the **Graph API** (no JSON files, no Chromium for Facebook). Until the app is **Live**, add your Facebook user under the app’s **Roles** so you can authorize.
-6. **Fallback:** **Accounts → Session JSON** (Playwright storage) still works for Instagram-only or if you skip the Meta app. Keep **`PROFILES_DIR` on `/data`** if you use it.
-7. **App URL:** The marketing site is **`/`**; the dashboard is **`/dashboard`** (requires login). Set **`PUBLIC_APP_URL`** to `https://YOUR_DOMAIN` so Facebook OAuth, Stripe success/cancel URLs, and password-reset links point at the correct host.
-8. **Stripe:** In Stripe Dashboard, create products/prices for Starter / Growth / Agency; paste **Price IDs** into Railway. Add webhook endpoint **`https://YOUR_DOMAIN/api/stripe/webhook`** and select events: `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`. Paste the **signing secret** into `STRIPE_WEBHOOK_SECRET`.
-9. **Password reset email:** If **`MAIL_SERVER`** is unset, reset links are **logged only** (see service logs). To send mail, configure SMTP — e.g. **SendGrid:** `MAIL_SERVER=smtp.sendgrid.net`, `MAIL_PORT=587`, `MAIL_USERNAME=apikey`, `MAIL_PASSWORD=<SendGrid API key>`, `MAIL_DEFAULT_SENDER=FastPost <no-reply@yourdomain.com>`, `MAIL_USE_TLS=1`. Verify the sender domain in SendGrid (or your provider).
+5. **Volume:** mount at **`/data`** and set **`DATABASE_PATH=/data/fastpost.db`**. Without this, SQLite lives on ephemeral disk and **accounts disappear on every redeploy** (the app will log the DB path at startup).
+6. **Posting:** runs **headless** on the server — no browser window on your PC (see Settings in the app).
+7. **Facebook (recommended):** add a Meta app with **Facebook Login**; set the `FACEBOOK_*` variables and the redirect URI above. In the app: **Accounts → Connect Facebook** once per account, then **Post now** uses the **Graph API** (no JSON files, no Chromium for Facebook). Until the app is **Live**, add your Facebook user under the app’s **Roles** so you can authorize.
+8. **Fallback:** **Accounts → Session JSON** (Playwright storage) still works for Instagram-only or if you skip the Meta app. Keep **`PROFILES_DIR` on `/data`** if you use it.
+9. **App URL:** The marketing site is **`/`**; the dashboard is **`/dashboard`** (requires login). Set **`PUBLIC_APP_URL`** to `https://YOUR_DOMAIN` so Facebook OAuth, Stripe success/cancel URLs, and password-reset links point at the correct host.
+10. **Stripe:** In Stripe Dashboard, create products/prices for Starter / Growth / Agency; paste **Price IDs** into Railway. Add webhook endpoint **`https://YOUR_DOMAIN/api/stripe/webhook`** and select events: `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`. Paste the **signing secret** into `STRIPE_WEBHOOK_SECRET`.
+11. **Password reset email:** If **`MAIL_SERVER`** is unset, reset links are **logged only** (see service logs). To send mail, configure SMTP — e.g. **SendGrid:** `MAIL_SERVER=smtp.sendgrid.net`, `MAIL_PORT=587`, `MAIL_USERNAME=apikey`, `MAIL_PASSWORD=<SendGrid API key>`, `MAIL_DEFAULT_SENDER=FastPost <no-reply@yourdomain.com>`, `MAIL_USE_TLS=1`. Verify the sender domain in SendGrid (or your provider).
 
 ### Meta app: “Can’t load URL” / App Domains
 

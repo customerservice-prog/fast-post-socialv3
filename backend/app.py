@@ -12,13 +12,9 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import quote, urlparse
 
-try:
-    import stripe
+import stripe
 
-    SignatureVerificationError = stripe.SignatureVerificationError
-except ImportError:  # pragma: no cover
-    stripe = None  # type: ignore[assignment, misc]
-    SignatureVerificationError = Exception  # webhook path unused without stripe
+SignatureVerificationError = stripe.SignatureVerificationError
 
 from flask import (
     Flask,
@@ -100,9 +96,63 @@ def _unauthorized():
     return redirect(url_for("login_page", next=next_url))
 
 
+_stripe_key = (os.getenv("STRIPE_SECRET_KEY") or "").strip()
+if _stripe_key:
+    stripe.api_key = _stripe_key
+
+
+def _log_startup_configuration_warnings() -> None:
+    """Surface missing production config in logs (no silent feature disable)."""
+    railway = bool(
+        (os.getenv("RAILWAY_ENVIRONMENT") or "").strip()
+        or (os.getenv("RAILWAY_PROJECT_ID") or "").strip()
+    )
+    sk = (os.getenv("SECRET_KEY") or "").strip()
+    if not sk or sk == "fastpost-secret-key-change-in-production":
+        logger.warning(
+            "SECRET_KEY is missing or still the default — set a long random string in production for Flask sessions."
+        )
+    if not _stripe_key:
+        logger.warning(
+            "STRIPE_SECRET_KEY is unset — Stripe Checkout, Billing Portal, and subscription API calls are disabled."
+        )
+    if not (os.getenv("STRIPE_PUBLISHABLE_KEY") or "").strip():
+        logger.warning(
+            "STRIPE_PUBLISHABLE_KEY is unset — client-side Stripe (e.g. Elements) on marketing pages will not initialize."
+        )
+    if not (os.getenv("STRIPE_WEBHOOK_SECRET") or "").strip():
+        logger.warning(
+            "STRIPE_WEBHOOK_SECRET is unset — webhook endpoint will respond 503 until set (use https://<host>/api/stripe/webhook in Stripe)."
+        )
+    for label, var in (
+        ("Starter", "STRIPE_STARTER_PRICE_ID"),
+        ("Growth", "STRIPE_GROWTH_PRICE_ID"),
+        ("Agency", "STRIPE_AGENCY_PRICE_ID"),
+    ):
+        if not (os.getenv(var) or "").strip():
+            logger.warning(
+                "%s (%s) is unset — map Stripe price IDs for checkout/plan sync (aliases STRIPE_PRICE_ID_* are not used by this app).",
+                label,
+                var,
+            )
+    if not mail_is_configured():
+        logger.warning(
+            "MAIL_SERVER is unset — password reset emails are not sent; links are logged only."
+        )
+    if (os.getenv("OPENAI_API_KEY") or "").strip():
+        logger.warning(
+            "OPENAI_API_KEY is set but unused — captions are generated locally from crawl data (no OpenAI calls)."
+        )
+    elif railway:
+        logger.info(
+            "OPENAI_API_KEY not required: content uses built-in templates (see NO_API_KEYS.md)."
+        )
+
+
 # Initialize core components
 logger.info("PROFILES_DIR (set to /data/browser_profiles + volume for headless sessions): %s", PROFILES_DIR.resolve())
 facebook_graph.log_facebook_oauth_env_warnings()
+_log_startup_configuration_warnings()
 crawler = BusinessCrawler()
 ai_gen = AIContentGenerator()
 
@@ -113,10 +163,6 @@ poster = StealthPoster(db=db)
 scheduler = PostScheduler(db=db, ai_gen=ai_gen, poster=poster, post_executor=_post_executor)
 
 FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
-
-_stripe_key = (os.getenv("STRIPE_SECRET_KEY") or "").strip()
-if stripe is not None and _stripe_key:
-    stripe.api_key = _stripe_key
 
 
 def _admin_email() -> str:
@@ -299,9 +345,16 @@ def _playwright_storage_file(account_id: int) -> Path:
     return (PROFILES_DIR / f"profile_{account_id}").resolve() / UPLOADED_STORAGE_NAME
 
 
-@app.route("/")
+@app.route("/", methods=["GET", "POST"])
 def landing_page():
-    """Public marketing landing."""
+    """Public marketing landing. POST / accepts Stripe webhooks if dashboard URL is mis-set to site root."""
+    if request.method == "POST":
+        if not request.headers.get("Stripe-Signature"):
+            abort(405)
+        logger.warning(
+            "Stripe webhook hit POST / — update Stripe Dashboard endpoint to .../api/stripe/webhook (root still works as fallback)."
+        )
+        return _stripe_webhook_process()
     pk = (os.getenv("STRIPE_PUBLISHABLE_KEY") or "").strip()
     return render_template("landing.html", stripe_publishable_key=pk)
 
@@ -467,7 +520,7 @@ def auth_reset_password_submit():
 @app.route("/api/billing/checkout", methods=["POST"])
 @login_required
 def billing_checkout():
-    if stripe is None or not _stripe_key:
+    if not _stripe_key:
         return jsonify({"error": "Stripe is not configured"}), 503
     data = request.get_json(silent=True) or {}
     plan = (data.get("plan") or "").lower().strip()
@@ -500,7 +553,7 @@ def billing_checkout():
 @app.route("/api/billing/portal", methods=["POST"])
 @login_required
 def billing_portal():
-    if stripe is None or not _stripe_key:
+    if not _stripe_key:
         return jsonify({"error": "Stripe is not configured"}), 503
     row = db.get_user_by_id(current_user.id)
     cust = (row.get("stripe_customer_id") or "").strip() if row else ""
@@ -518,15 +571,13 @@ def billing_portal():
     return jsonify({"url": sess.url})
 
 
-@app.route("/api/stripe/webhook", methods=["POST"])
-def stripe_webhook():
+def _stripe_webhook_process():
+    """Shared Stripe webhook handler (POST body + Stripe-Signature required)."""
     wh_secret = (os.getenv("STRIPE_WEBHOOK_SECRET") or "").strip()
     payload = request.get_data(as_text=False)
     sig = request.headers.get("Stripe-Signature") or ""
     if not wh_secret:
         return jsonify({"error": "Webhook not configured"}), 503
-    if stripe is None:
-        return jsonify({"error": "Stripe is not installed"}), 503
     try:
         event = stripe.Webhook.construct_event(payload=payload, sig_header=sig, secret=wh_secret)
     except ValueError:
@@ -629,6 +680,11 @@ def stripe_webhook():
         return jsonify({"received": True}), 200
 
     return jsonify({"received": True})
+
+
+@app.route("/api/stripe/webhook", methods=["POST"])
+def stripe_webhook():
+    return _stripe_webhook_process()
 
 
 # ─── ADMIN API ────────────────────────────────────────────────────────────────
