@@ -826,3 +826,64 @@ class Database:
         ).fetchone()
         conn.close()
         return int(row["c"]) if row else 0
+
+    # ── YouTube token storage ──────────────────────────────────────────────────
+
+    def save_youtube_token(self, account_id: int, token_json: str) -> None:
+        """Store YouTube OAuth token (JSON string) for an account."""
+        conn = self.get_conn()
+        try:
+            # Try to update existing row in accounts (we store in a sidecar table if column missing)
+            try:
+                conn.execute(
+                    "UPDATE accounts SET youtube_token = ? WHERE id = ?",
+                    (token_json, account_id),
+                )
+                conn.commit()
+            except Exception:
+                # Column may not exist yet — create sidecar table
+                conn.execute(
+                    """CREATE TABLE IF NOT EXISTS youtube_tokens (
+                        account_id INTEGER PRIMARY KEY,
+                        token_json TEXT NOT NULL,
+                        updated_at TEXT DEFAULT (datetime('now'))
+                    )"""
+                )
+                conn.execute(
+                    """INSERT INTO youtube_tokens (account_id, token_json, updated_at)
+                       VALUES (?, ?, datetime('now'))
+                       ON CONFLICT(account_id) DO UPDATE SET
+                         token_json=excluded.token_json,
+                         updated_at=datetime('now')""",
+                    (account_id, token_json),
+                )
+                conn.commit()
+        finally:
+            conn.close()
+
+    def get_youtube_token(self, account_id: int) -> Optional[str]:
+        """Return stored YouTube OAuth token JSON for an account, or None."""
+        conn = self.get_conn()
+        try:
+            # Try accounts column first
+            try:
+                row = conn.execute(
+                    "SELECT youtube_token FROM accounts WHERE id = ?", (account_id,)
+                ).fetchone()
+                if row and row["youtube_token"]:
+                    return row["youtube_token"]
+            except Exception:
+                pass
+            # Try sidecar table
+            try:
+                row = conn.execute(
+                    "SELECT token_json FROM youtube_tokens WHERE account_id = ?", (account_id,)
+                ).fetchone()
+                if row:
+                    return row["token_json"]
+            except Exception:
+                pass
+            return None
+        finally:
+            conn.close()
+
