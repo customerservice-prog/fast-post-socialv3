@@ -12,8 +12,14 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import quote, urlparse
 
-import stripe
-from stripe.error import SignatureVerificationError
+try:
+    import stripe
+
+    SignatureVerificationError = stripe.SignatureVerificationError
+except ImportError:  # pragma: no cover
+    stripe = None  # type: ignore[assignment, misc]
+    SignatureVerificationError = Exception  # webhook path unused without stripe
+
 from flask import (
     Flask,
     request,
@@ -109,7 +115,7 @@ scheduler = PostScheduler(db=db, ai_gen=ai_gen, poster=poster, post_executor=_po
 FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
 
 _stripe_key = (os.getenv("STRIPE_SECRET_KEY") or "").strip()
-if _stripe_key:
+if stripe is not None and _stripe_key:
     stripe.api_key = _stripe_key
 
 
@@ -461,7 +467,7 @@ def auth_reset_password_submit():
 @app.route("/api/billing/checkout", methods=["POST"])
 @login_required
 def billing_checkout():
-    if not _stripe_key:
+    if stripe is None or not _stripe_key:
         return jsonify({"error": "Stripe is not configured"}), 503
     data = request.get_json(silent=True) or {}
     plan = (data.get("plan") or "").lower().strip()
@@ -494,7 +500,7 @@ def billing_checkout():
 @app.route("/api/billing/portal", methods=["POST"])
 @login_required
 def billing_portal():
-    if not _stripe_key:
+    if stripe is None or not _stripe_key:
         return jsonify({"error": "Stripe is not configured"}), 503
     row = db.get_user_by_id(current_user.id)
     cust = (row.get("stripe_customer_id") or "").strip() if row else ""
@@ -519,6 +525,8 @@ def stripe_webhook():
     sig = request.headers.get("Stripe-Signature") or ""
     if not wh_secret:
         return jsonify({"error": "Webhook not configured"}), 503
+    if stripe is None:
+        return jsonify({"error": "Stripe is not installed"}), 503
     try:
         event = stripe.Webhook.construct_event(payload=payload, sig_header=sig, secret=wh_secret)
     except ValueError:
