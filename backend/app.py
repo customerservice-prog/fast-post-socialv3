@@ -412,6 +412,14 @@ def admin_page():
     return render_template("admin.html")
 
 
+@app.route("/admin/login")
+def admin_login_page():
+    """Dedicated admin login page — redirects to /admin if already admin."""
+    if current_user.is_authenticated and _is_admin_user():
+        return redirect("/admin")
+    return render_template("admin_login.html", next_url="/admin")
+
+
 @app.route("/dashboard")
 @login_required
 def dashboard_app():
